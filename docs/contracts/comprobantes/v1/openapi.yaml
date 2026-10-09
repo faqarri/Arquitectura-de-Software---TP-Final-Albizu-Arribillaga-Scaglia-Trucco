@@ -1,0 +1,344 @@
+openapi: 3.0.3
+info:
+  title: API de Emisión de Comprobantes
+  version: 1.0.0
+  description: |
+    Capacidad publicada por el sistema Agencia de Viajes.
+    Permite emitir comprobantes (facturas) con sus ítems, obtenerlos en PDF
+    y opcionalmente enviarlos por correo electrónico.
+
+    - Autenticación: header `X-API-Key` provisto a cada grupo consumidor.
+    - Idempotencia: header `Idempotency-Key` obligatorio en la emisión.
+    - Errores: `application/problem+json` (RFC 9457).
+servers:
+  - url: https://URL-PUBLICA-PENDIENTE/v1
+    description: Producción (pendiente de despliegue)
+  - url: http://localhost:4010/v1
+    description: Mock local (Prism)
+security:
+  - ApiKeyAuth: []
+paths:
+  /comprobantes:
+    post:
+      operationId: emitirComprobante
+      summary: Emite un comprobante
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudComprobante'
+            examples:
+              basico:
+                $ref: '#/components/examples/SolicitudBasica'
+      responses:
+        '201':
+          description: Comprobante emitido
+          headers:
+            Location:
+              schema:
+                type: string
+              description: URL del comprobante creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comprobante'
+              examples:
+                emitido:
+                  $ref: '#/components/examples/ComprobanteEmitido'
+        '200':
+          description: Reintento con la misma Idempotency-Key y el mismo cuerpo. Devuelve el comprobante ya emitido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comprobante'
+        '400':
+          $ref: '#/components/responses/SolicitudInvalida'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '409':
+          $ref: '#/components/responses/ConflictoIdempotencia'
+        '422':
+          $ref: '#/components/responses/ReglaIncumplida'
+        '429':
+          $ref: '#/components/responses/DemasiadasSolicitudes'
+        '503':
+          $ref: '#/components/responses/NoDisponible'
+  /comprobantes/{comprobanteId}:
+    get:
+      operationId: obtenerComprobante
+      summary: Obtiene un comprobante por id
+      parameters:
+        - $ref: '#/components/parameters/ComprobanteId'
+      responses:
+        '200':
+          description: Comprobante encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comprobante'
+              examples:
+                emitido:
+                  $ref: '#/components/examples/ComprobanteEmitido'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+  /comprobantes/{comprobanteId}/pdf:
+    get:
+      operationId: descargarComprobantePdf
+      summary: Descarga el comprobante en PDF
+      parameters:
+        - $ref: '#/components/parameters/ComprobanteId'
+      responses:
+        '200':
+          description: Archivo PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Identificador único de la operación generado por el consumidor (se recomienda UUID). Se conserva 7 días.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 64
+      example: 3f1c2a9e-8b7d-4e21-9c55-0a1b2c3d4e5f
+    ComprobanteId:
+      name: comprobanteId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    SolicitudComprobante:
+      type: object
+      required: [referenciaExterna, cliente, items, moneda]
+      properties:
+        referenciaExterna:
+          type: string
+          maxLength: 100
+          description: Identificador de la operación en el sistema consumidor (por ejemplo, id de orden).
+        cliente:
+          $ref: '#/components/schemas/Cliente'
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/Item'
+        moneda:
+          type: string
+          enum: [ARS, USD]
+        enviarPorCorreo:
+          type: boolean
+          default: false
+          description: Si es true, el comprobante se envía en PDF al email del cliente de forma asíncrona.
+    Cliente:
+      type: object
+      required: [nombre, email]
+      properties:
+        nombre:
+          type: string
+          maxLength: 120
+        email:
+          type: string
+          format: email
+        documento:
+          type: string
+          maxLength: 20
+          description: DNI o CUIT, opcional.
+    Item:
+      type: object
+      required: [descripcion, cantidad, precioUnitario]
+      properties:
+        descripcion:
+          type: string
+          maxLength: 200
+        cantidad:
+          type: integer
+          minimum: 1
+        precioUnitario:
+          type: number
+          format: double
+          minimum: 0
+    Comprobante:
+      type: object
+      required: [id, numero, referenciaExterna, cliente, items, moneda, total, fechaEmision, estadoEnvio]
+      properties:
+        id:
+          type: string
+          format: uuid
+        numero:
+          type: string
+          description: Número correlativo del comprobante.
+          example: B-0001-00000042
+        referenciaExterna:
+          type: string
+        cliente:
+          $ref: '#/components/schemas/Cliente'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Item'
+        moneda:
+          type: string
+          enum: [ARS, USD]
+        total:
+          type: number
+          format: double
+        fechaEmision:
+          type: string
+          format: date-time
+        estadoEnvio:
+          type: string
+          enum: [NO_SOLICITADO, PENDIENTE, ENVIADO, FALLIDO]
+        pdfUrl:
+          type: string
+          description: Ruta relativa para descargar el PDF.
+    Problema:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        errores:
+          type: array
+          items:
+            type: object
+            properties:
+              campo:
+                type: string
+              mensaje:
+                type: string
+  responses:
+    SolicitudInvalida:
+      description: El cuerpo no respeta el esquema. No reintentar sin corregir.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://agencia-viajes.example/errores/solicitud-invalida
+            title: Solicitud inválida
+            status: 400
+            errores:
+              - campo: items[0].cantidad
+                mensaje: debe ser mayor o igual a 1
+    NoAutenticado:
+      description: Falta la API Key o es inválida.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://agencia-viajes.example/errores/no-autenticado
+            title: No autenticado
+            status: 401
+    ConflictoIdempotencia:
+      description: La Idempotency-Key ya fue usada con un cuerpo distinto. Generar una clave nueva.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://agencia-viajes.example/errores/conflicto-idempotencia
+            title: Clave de idempotencia reutilizada
+            status: 409
+    ReglaIncumplida:
+      description: La solicitud es válida en forma pero incumple una regla (por ejemplo, total igual a cero).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://agencia-viajes.example/errores/regla-incumplida
+            title: Regla de negocio incumplida
+            status: 422
+            detail: El total del comprobante debe ser mayor a cero.
+    NoEncontrado:
+      description: No existe un comprobante con ese id para este consumidor.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+          example:
+            type: https://agencia-viajes.example/errores/no-encontrado
+            title: Comprobante no encontrado
+            status: 404
+    DemasiadasSolicitudes:
+      description: Se superó el límite de solicitudes. Reintentar luego del tiempo indicado en Retry-After.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+    NoDisponible:
+      description: Servicio temporalmente no disponible. Se puede reintentar con la misma Idempotency-Key sin riesgo de duplicar.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+  examples:
+    SolicitudBasica:
+      value:
+        referenciaExterna: ORD-2026-000123
+        cliente:
+          nombre: Ana Pérez
+          email: ana.perez@example.com
+          documento: "30123456"
+        items:
+          - descripcion: Entrada general
+            cantidad: 2
+            precioUnitario: 15000
+        moneda: ARS
+        enviarPorCorreo: true
+    ComprobanteEmitido:
+      value:
+        id: 6b0c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3
+        numero: B-0001-00000042
+        referenciaExterna: ORD-2026-000123
+        cliente:
+          nombre: Ana Pérez
+          email: ana.perez@example.com
+          documento: "30123456"
+        items:
+          - descripcion: Entrada general
+            cantidad: 2
+            precioUnitario: 15000
+        moneda: ARS
+        total: 30000
+        fechaEmision: '2026-10-09T15:30:00Z'
+        estadoEnvio: PENDIENTE
+        pdfUrl: /v1/comprobantes/6b0c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3/pdf
