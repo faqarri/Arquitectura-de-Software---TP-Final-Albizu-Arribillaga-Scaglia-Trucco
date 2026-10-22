@@ -49,9 +49,10 @@ services:
   # --- Servicios (se habilitan a medida que se implementan) ---
   # gateway:      { build: ./gateway, ports: ["8080:8080"], env_file: .env }
   # usuarios:     { build: ./services/usuarios, env_file: .env, depends_on: [mysql] }
-  # catalogo:     { build: ./services/catalogo, env_file: .env, depends_on: [mongo, opensearch, rabbitmq] }
+  # catalogo:     { build: ./services/catalogo, env_file: .env, depends_on: [mongo, mysql, opensearch, rabbitmq] }  # mysql: inventario y retenciones (ADR-014)
   # reservas:     { build: ./services/reservas, env_file: .env, depends_on: [mysql, rabbitmq] }
   # comprobantes: { build: ./services/comprobantes, env_file: .env, depends_on: [mysql, rabbitmq, mailpit] }
+  # tiempo-real:  { build: ./services/tiempo-real, env_file: .env, depends_on: [rabbitmq] }  # sin estado, SSE vía gateway (ADR-015)
   # frontend:     { build: ./frontend, ports: ["5173:5173"] }
 
 volumes:

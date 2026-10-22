@@ -1,26 +1,36 @@
 # Servicio Reservas
 
-**Responsabilidad:** carrito, confirmación de compras, estados de compra y **cupos disponibles**. Contiene la operación crítica del sistema (sin sobreventa, compra atómica).
+**Responsabilidad:** carrito, confirmación de compras y estados de compra (`PENDIENTE`, `CONFIRMADA`, `RECHAZADA`). Coordina la operación crítica: pide a Catálogo retener cupo al agregar al carrito y confirmar las retenciones al comprar, y registra el resultado. **No guarda cupos**: los cupos y las retenciones son de Catálogo ([ADR-014](../../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md)).
 
-**Datos propios (MySQL):** carritos, compras, ítems de compra, inventario de cupos, outbox de eventos.
+**Datos propios (MySQL, esquema `reservas`):** carritos (cada ítem guarda `retencionId` y `expiraEn`; un pack guarda las retenciones de todas sus opciones), compras e ítems de compra con el precio confirmado, outbox de eventos.
 
 **Dependencias:**
 
 | Dependencia | Tipo | Uso |
 |---|---|---|
-| MySQL | Almacenamiento | Transacción de compra y cupos |
-| Catálogo | REST síncrono | Precio vigente y definición de pack al confirmar (timeout 2 s, 2 reintentos) |
-| RabbitMQ | Mensajería | Publica `CompraConfirmada` (vía outbox); consume `OfertaPublicada` |
+| MySQL | Almacenamiento | Carrito, compras y outbox |
+| Catálogo (API interna) | REST síncrono | `POST /internal/retenciones`, `DELETE /internal/retenciones/{id}`, `POST /internal/retenciones/confirmacion`. Timeout 2 s, hasta 2 reintentos con backoff y jitter; los 409 y 422 de negocio no se reintentan |
+| RabbitMQ | Mensajería | Publica `CompraConfirmada` (vía outbox) con `email` e `items` (`descripcion`, `precio`). Consume `RetencionVencida` (cola `reservas.retenciones`, con DLQ) para marcar ítems del carrito como vencidos |
 
-**Estructura tentativa (Go, arquitectura hexagonal):** el dominio (reglas RN-01 a RN-07) no depende de frameworks ni de la base, lo que facilita los tests unitarios de las reglas.
+**Comportamiento ante fallas de Catálogo:**
+
+| Operación | Si Catálogo no responde |
+|---|---|
+| Agregar al carrito | `503`; el ítem no se agrega |
+| Quitar del carrito | El ítem se quita igual; la retención vence sola |
+| Comprar | La compra queda `PENDIENTE` (`202`); un **proceso de recuperación** reintenta la confirmación con la misma `Idempotency-Key` (= `compraId`) hasta obtener `200` o `409` |
+
+**Estructura tentativa (Go, arquitectura hexagonal; a confirmar en D2):** el dominio (estados de la compra y del ítem del carrito, reglas de transición) no depende de frameworks ni de la base, lo que facilita los tests unitarios.
 
 ```
 cmd/reservas/main.go
-internal/domain/          # entidades y reglas: Compra, Cupo, validación de packs y fechas
-internal/application/     # casos de uso: ConfirmarCompra, AgregarAlCarrito
-internal/ports/           # interfaces: RepositorioCompras, CatalogoClient, PublicadorEventos
-internal/adapters/http/   # handlers (Gin)
-internal/adapters/mysql/  # repositorios (GORM)
-internal/adapters/catalogo/ # cliente REST con timeout y reintentos
-internal/adapters/rabbit/ # outbox publisher y consumidor
+internal/domain/            # entidades y reglas: Carrito, ItemCarrito (retención, vencimiento), Compra y sus estados
+internal/application/       # casos de uso: AgregarAlCarrito, QuitarDelCarrito, ConfirmarCompra, RecuperarComprasPendientes, MarcarRetencionVencida
+internal/ports/             # interfaces: RepositorioCompras, RetencionesCatalogo, PublicadorEventos
+internal/adapters/http/     # handlers (Gin)
+internal/adapters/mysql/    # repositorios (GORM)
+internal/adapters/catalogo/ # cliente REST de la API interna con timeout, reintentos e Idempotency-Key
+internal/adapters/rabbit/   # outbox publisher y consumidor de RetencionVencida
 ```
+
+**Historial:** 2026-10-22: deja de guardar cupos (pasan a Catálogo). Retiene al agregar al carrito y confirma retenciones al comprar. Se agrega el estado `PENDIENTE` con recuperación. Ya no consulta precios ni consume `OfertaPublicada`; consume `RetencionVencida` ([ADR-014](../../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md)).

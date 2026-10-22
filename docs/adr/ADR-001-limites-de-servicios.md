@@ -1,8 +1,10 @@
 # ADR-001: Límites de los servicios
 
-- **Estado:** Aceptada
+- **Estado:** Reemplazada por [ADR-014](ADR-014-cupos-en-catalogo-con-retencion.md) (2026-10-22)
 - **Fecha:** 2026-10-09
 - **Decisión de la cátedra:** D1
+
+> **Nota (2026-10-22):** este ADR se conserva sin cambios como registro histórico. La devolución de la Entrega 1 pidió que los cupos vivan en Catálogo y se retengan al agregar al carrito; eso invalida el criterio 2 ("frontera transaccional": cupos en Reservas). La decisión vigente sobre límites de servicios está en ADR-014. Además, las sugerencias mencionadas abajo fueron quitadas del alcance.
 
 ## Contexto
 
