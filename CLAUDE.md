@@ -58,6 +58,24 @@ consume la de otro grupo.
   `docs/devoluciones/` (qué se pidió, qué se cambió, dónde quedó documentado).
 - Toda la documentación va en español. Diagramas en Mermaid.
 
+## Forma de trabajo
+
+- `main` es la base común y la versión evaluable; solo recibe Pull Requests.
+- Cada integrante trabaja en su rama personal (`albizu`, `arribillaga`, `scaglia`,
+  `trucco`), actualizada desde `main` antes de cada tarea.
+
+## Decisiones de diseño a respetar al implementar
+
+- **Catálogo:** retener, liberar, confirmar y vencer bloquean **primero el inventario**
+  (en orden de `oferta_id`) y después las retenciones (ADR-014 § Revisiones).
+- **Identidad:** el gateway propaga `X-Usuario-Id`, `X-Usuario-Email` y `X-Usuario-Rol`
+  desde el JWT. Reservas guarda el email en la compra.
+- **Comprobantes:** hexagonal (ADR-002). Idempotencia `UNIQUE (consumidor, idempotency_key)`
+  con hash del cuerpo; el envío de correo sale por outbox (`EnvioSolicitado`).
+- **Dinero:** siempre `DECIMAL(12,2)` en MySQL, nunca float.
+- **MySQL:** cada servicio se conecta con su propio usuario (`<servicio>` /
+  `<SERVICIO>_DB_PASSWORD`), nunca con root.
+
 ## Stack
 
 Go (Gin/GORM), React + Vite, MySQL, MongoDB, OpenSearch, RabbitMQ, Mailpit en local,

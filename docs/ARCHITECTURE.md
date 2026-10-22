@@ -10,13 +10,17 @@ El sistema se compone de un **API Gateway** como único punto de entrada y cinco
 |---|---|---|---|
 | **Catálogo** | Qué se vende y cuánto queda: ofertas, packs, búsqueda, **inventario de cupos, retenciones y disponibilidad**. Valida las reglas de pack y calcula precios al confirmar | Ofertas (transporte, estadía, excursión), packs y sus opciones; inventario; retenciones; confirmaciones; outbox | MongoDB (descripciones) + MySQL esquema `catalogo` (inventario, retenciones, outbox) + índice en OpenSearch |
 | **Reservas** | Carrito, compras y sus estados; recuperación de compras pendientes | Carritos (cada ítem con `retencionId` y `expiraEn`), compras (`PENDIENTE`, `CONFIRMADA`, `RECHAZADA`), outbox de eventos | MySQL esquema `reservas` |
-| **Comprobantes** | Emisión de facturas y envío por correo. **Capacidad publicada** para otros grupos | Comprobantes emitidos, claves de idempotencia, estado de envío | MySQL esquema `comprobantes` |
+| **Comprobantes** | Emisión de facturas y envío por correo. **Capacidad publicada** para otros grupos | Comprobantes emitidos, claves de idempotencia por consumidor, estado de envío, outbox | MySQL esquema `comprobantes` |
 | **Usuarios** | Registro, autenticación y emisión de tokens JWT | Usuarios, roles, hash de contraseñas | MySQL esquema `usuarios` |
 | **Tiempo Real** | Difunde a los navegadores, por SSE, los cambios de disponibilidad y los vencimientos de retención | Ninguno (sin estado) | — |
 
 Cada servicio accede solo a su propia base. Ningún servicio lee la base de otro: la información se obtiene por API o por eventos.
 
-Decisiones principales: límites de servicios en [ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md) (reemplaza a ADR-001) y tiempo real en [ADR-015](adr/ADR-015-disponibilidad-en-tiempo-real.md).
+Decisiones principales: límites de servicios en [ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md) (reemplaza a ADR-001), arquitectura interna en [ADR-002](adr/ADR-002-arquitectura-interna.md) y tiempo real en [ADR-015](adr/ADR-015-disponibilidad-en-tiempo-real.md).
+
+**Arquitectura interna ([ADR-002](adr/ADR-002-arquitectura-interna.md)):** Comprobantes y Reservas son **hexagonales** (puertos y adaptadores); Catálogo y Usuarios están organizados **en capas**; Tiempo Real es un conjunto de componentes simples.
+
+**Identidad:** el gateway valida el JWT y propaga a los servicios `X-Usuario-Id`, `X-Usuario-Email` y `X-Usuario-Rol`, después de descartar esos headers si vinieron del cliente.
 
 ## 2. Diagrama de contexto
 
@@ -105,10 +109,11 @@ flowchart TB
 | Gateway → Servicios | Síncrona | REST/JSON | Ruteo de solicitudes autenticadas |
 | Reservas → Catálogo | Síncrona | REST/JSON interno, timeout 2 s, 2 reintentos con backoff y jitter, idempotente | Retener cupo al agregar al carrito, liberar al quitar, confirmar retenciones al comprar (devuelve precios) |
 | Reservas → Comprobantes | Asíncrona | Evento `CompraConfirmada` en RabbitMQ (outbox), cola con DLQ | Emitir comprobante y enviar correo |
+| Comprobantes → Comprobantes (worker de envío) | Asíncrona | Evento `EnvioSolicitado` (outbox) en la cola `comprobantes.envios`, con reintentos y DLQ | Generar el PDF y enviar el correo sin que se pierda si el servicio se cae |
 | Catálogo → Catálogo (indexador) | Asíncrona | Evento `OfertaActualizada`, cola con DLQ | Mantener sincronizado el índice de búsqueda |
 | Catálogo → Tiempo Real | Asíncrona | `DisponibilidadCambiada` y `RetencionVencida` (outbox) en exchange fanout `catalogo.disponibilidad`, cola exclusiva por instancia, **sin DLQ** | Notificar a los navegadores |
 | Catálogo → Reservas | Asíncrona | `RetencionVencida` en el mismo fanout, cola durable `reservas.retenciones` con DLQ | Marcar el ítem del carrito como vencido |
-| Consumidor externo → Comprobantes | Síncrona | REST/JSON, contrato OpenAPI v1 (1.0.0) | Capacidad publicada |
+| Consumidor externo → Comprobantes | Síncrona | REST/JSON, contrato OpenAPI v1 (1.0.1) | Capacidad publicada |
 
 Detalle y justificación en [ADR-005](adr/ADR-005-comunicacion-entre-servicios.md).
 
@@ -164,10 +169,10 @@ sequenceDiagram
     participant M as SMTP
 
     C->>GW: POST /api/compras (JWT, Idempotency-Key)
-    GW->>R: POST /compras
-    R->>RDB: INSERT compra PENDIENTE (compraId)
+    GW->>R: POST /compras (X-Usuario-Id, X-Usuario-Email)
+    R->>RDB: INSERT compra PENDIENTE (compraId, email)
     R->>CAT: POST /internal/retenciones/confirmacion<br/>Idempotency-Key = compraId, timeout 2s
-    CAT->>CAT: BEGIN, retenciones FOR UPDATE<br/>todas ACTIVA y expira_en > NOW()?
+    CAT->>CAT: BEGIN, inventario FOR UPDATE (orden por oferta_id),<br/>luego retenciones FOR UPDATE<br/>todas ACTIVA y expira_en > NOW()?
     alt todas vigentes
         CAT->>CAT: ACTIVA a CONFIRMADA, vendidos + cantidad,<br/>precios vigentes con descuento de pack,<br/>INSERT confirmaciones y outbox, COMMIT
         CAT-->>R: 200 líneas (descripcion, precio)
@@ -176,8 +181,8 @@ sequenceDiagram
         GW-->>C: 201
         R-)MQ: CompraConfirmada (email, items) desde outbox
         MQ-)CP: CompraConfirmada
-        CP->>CP: verifica idempotencia (compraId)
-        CP->>M: envía correo con factura PDF
+        CP->>CP: idempotencia (interno, compraId), INSERT comprobante<br/>y outbox EnvioSolicitado en una transacción
+        CP->>M: worker de envío: genera el PDF y envía el correo
     else alguna vencida o liberada
         CAT-->>R: 409 RETENCION_NO_VIGENTE (ninguna cambia)
         R->>RDB: compra RECHAZADA, ítems vencidos marcados
@@ -256,8 +261,7 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 
 ## 8. Pendientes de diseño
 
-- D2 Arquitectura interna. Tentativo: Reservas con arquitectura hexagonal (ciclo de vida de carrito y compra, recuperación de pendientes, puertos hacia Catálogo y el broker); Catálogo en capas. Con ADR-014, las reglas de pack (RN-03 a RN-05) y de retención pasaron a Catálogo, así que hay que reevaluar qué servicio aprovecha más cada estilo.
-- D4 Consistencia y concurrencia: formalizar lo descrito en ADR-014 (bloqueos, idempotencia, recuperación).
+- D4 Consistencia y concurrencia: formalizar lo descrito en ADR-014 (regla de bloqueo, idempotencia, recuperación) y en Comprobantes (idempotencia por consumidor, outbox del envío).
 - D6 Búsqueda, D7 Caché, D10 Resiliencia, D11 Observabilidad, D12 Balanceo, D13 Capacidad.
 - Tecnología del API Gateway (debe soportar SSE: sin buffering y con timeouts largos por ruta).
 
@@ -270,6 +274,10 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 - **Tiempo real de mejor esfuerzo.** Los avisos pueden perderse o llegar tarde (hasta el intervalo del proceso de vencimiento, 15 s por defecto, más la latencia del outbox). La fuente de verdad es `GET /api/ofertas/{id}/disponibilidad`.
 - **Conexiones largas en el gateway.** Cada navegador con la app abierta mantiene hasta dos conexiones SSE. Con HTTP/1.1, varias pestañas pueden alcanzar el límite de conexiones por dominio.
 - **Reloj del navegador.** La cuenta regresiva usa `expiraEn` y el reloj local; si el reloj del cliente está desfasado, puede mostrar un tiempo distinto. La validez real la decide siempre la base de Catálogo.
+- **Contención en ofertas muy demandadas.** Todas las operaciones sobre una misma oferta se serializan en su fila de inventario (regla de bloqueo de ADR-014). Las transacciones son cortas; el impacto se medirá en las pruebas de carga.
+- **Correo "al menos una vez".** Si el worker de Comprobantes se cae después de que el servidor de correo aceptó el mensaje y antes de marcar `ENVIADO`, al reintentar el correo se envía de nuevo. Nunca se emite un segundo comprobante, pero en ese caso puntual el cliente puede recibir el mismo correo dos veces. Con SMTP no se puede garantizar "exactamente una vez"; la ventana es de milisegundos.
+- **Numeración con huecos.** El número de comprobante sale de una columna `AUTO_INCREMENT`; una inserción que falla (por ejemplo, por clave de idempotencia repetida) consume un número y deja un hueco en la secuencia.
+- **Rate limit por instancia.** El límite de 60 solicitudes por minuto de la API de Comprobantes se cuenta en memoria de cada instancia; con varias instancias, el límite efectivo se multiplica.
 
 _Se completará a medida que avance la implementación._
 
@@ -279,3 +287,4 @@ _Se completará a medida que avance la implementación._
 |---|---|---|
 | 2026-10-09 | Versión inicial (Entrega 1). | — |
 | 2026-10-22 | Cupos, retenciones y disponibilidad pasan de Reservas a Catálogo (MySQL esquema `catalogo`). Se agrega el servicio Tiempo Real. Se quitan las sugerencias, la consulta de precios Reservas → Catálogo y el evento `OfertaPublicada`. Se agregan los eventos `DisponibilidadCambiada` y `RetencionVencida`. Se reemplaza el diagrama de confirmación de compra y se agregan los de retención y tiempo real. Se completan las limitaciones conocidas. Se aclara que la API pública de Comprobantes no pasa por el gateway. | Devolución de la Entrega 1 ([ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md), [ADR-015](adr/ADR-015-disponibilidad-en-tiempo-real.md), [ADR-008](adr/ADR-008-contrato-propio.md)). |
+| 2026-10-22 | Se agrega la arquitectura interna (ADR-002) y los headers de identidad del gateway. El diagrama de confirmación muestra el bloqueo del inventario antes de las retenciones, el email guardado en la compra y el outbox de Comprobantes. Se agrega la comunicación interna `EnvioSolicitado`. Se quita D2 de pendientes y se suman cuatro limitaciones. | Revisión interna del diseño ([ADR-002](adr/ADR-002-arquitectura-interna.md), revisiones de [ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md#revisiones), [ADR-005](adr/ADR-005-comunicacion-entre-servicios.md#revisiones) y [ADR-008](adr/ADR-008-contrato-propio.md#revisiones)). |

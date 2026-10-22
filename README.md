@@ -33,6 +33,8 @@ cp .env.example .env      # completar valores locales (no se versiona)
 docker compose up -d
 ```
 
+> MySQL crea los esquemas y un usuario por servicio **solo la primera vez**, con el volumen vacío. Si ya habías levantado el entorno antes de esos cambios, ejecutá `docker compose down -v` y después `docker compose up -d` (borra los datos locales).
+
 Servicios de infraestructura disponibles en esta etapa:
 
 | Componente | URL local |
@@ -68,7 +70,8 @@ La capacidad publicada (API de Comprobantes) se desplegará en la nube con URL p
 
 ## Forma de trabajo
 
-- `main`: rama protegida, solo recibe merges por Pull Request. Contiene la versión evaluable.
-- `feature/<servicio>-<descripcion>`: una rama por funcionalidad.
+- `main`: rama protegida, solo recibe merges por Pull Request. Contiene la versión evaluable y es el punto de partida común.
+- **Una rama por integrante** (`albizu`, `arribillaga`, `scaglia`, `trucco`). Cada uno trabaja en la suya y, antes de empezar una tarea, la actualiza con lo último de `main`.
+- El trabajo terminado se integra a `main` con un Pull Request desde la rama personal.
 - Cada PR requiere al menos una revisión de otro integrante y que pasen los tests.
 - Los secretos se cargan por variables de entorno (`.env`, excluido del repositorio). `.env.example` documenta las variables sin valores reales.

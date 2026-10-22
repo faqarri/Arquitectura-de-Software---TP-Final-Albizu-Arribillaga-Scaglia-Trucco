@@ -2,7 +2,9 @@
 
 **Responsabilidad:** carrito, confirmación de compras y estados de compra (`PENDIENTE`, `CONFIRMADA`, `RECHAZADA`). Coordina la operación crítica: pide a Catálogo retener cupo al agregar al carrito y confirmar las retenciones al comprar, y registra el resultado. **No guarda cupos**: los cupos y las retenciones son de Catálogo ([ADR-014](../../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md)).
 
-**Datos propios (MySQL, esquema `reservas`):** carritos (cada ítem guarda `retencionId` y `expiraEn`; un pack guarda las retenciones de todas sus opciones), compras e ítems de compra con el precio confirmado, outbox de eventos.
+**Datos propios (MySQL, esquema `reservas`):** carritos (cada ítem guarda `retencionId` y `expiraEn`; un pack guarda las retenciones de todas sus opciones), compras (con el email del cliente) e ítems de compra con el precio confirmado, outbox de eventos.
+
+**Identidad del cliente:** el id y el email del usuario llegan en los headers `X-Usuario-Id` y `X-Usuario-Email`, que el gateway completa a partir del JWT. El email se guarda en la compra al crearla, así el evento `CompraConfirmada` y el proceso de recuperación de compras pendientes no dependen de Usuarios.
 
 **Dependencias:**
 
@@ -20,7 +22,7 @@
 | Quitar del carrito | El ítem se quita igual; la retención vence sola |
 | Comprar | La compra queda `PENDIENTE` (`202`); un **proceso de recuperación** reintenta la confirmación con la misma `Idempotency-Key` (= `compraId`) hasta obtener `200` o `409` |
 
-**Estructura tentativa (Go, arquitectura hexagonal; a confirmar en D2):** el dominio (estados de la compra y del ítem del carrito, reglas de transición) no depende de frameworks ni de la base, lo que facilita los tests unitarios.
+**Estructura (Go, arquitectura hexagonal, [ADR-002](../../docs/adr/ADR-002-arquitectura-interna.md)):** el dominio (estados de la compra y del ítem del carrito, reglas de transición) no depende de frameworks ni de la base, lo que facilita los tests unitarios.
 
 ```
 cmd/reservas/main.go
@@ -33,4 +35,4 @@ internal/adapters/catalogo/ # cliente REST de la API interna con timeout, reinte
 internal/adapters/rabbit/   # outbox publisher y consumidor de RetencionVencida
 ```
 
-**Historial:** 2026-10-22: deja de guardar cupos (pasan a Catálogo). Retiene al agregar al carrito y confirma retenciones al comprar. Se agrega el estado `PENDIENTE` con recuperación. Ya no consulta precios ni consume `OfertaPublicada`; consume `RetencionVencida` ([ADR-014](../../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md)).
+**Historial:** 2026-10-22: deja de guardar cupos (pasan a Catálogo). Retiene al agregar al carrito y confirma retenciones al comprar. Se agrega el estado `PENDIENTE` con recuperación. Ya no consulta precios ni consume `OfertaPublicada`; consume `RetencionVencida` ([ADR-014](../../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md)). 2026-10-22: el email del cliente se obtiene del header `X-Usuario-Email` y se guarda en la compra.

@@ -30,13 +30,15 @@ Estados de retención: `ACTIVA`, `CONFIRMADA`, `LIBERADA`, `VENCIDA`. Una retenc
 
 **Procesos en segundo plano:**
 
-- **Vencimiento de retenciones** (cada 15 s): marca `VENCIDA` las retenciones activas con `expira_en <= NOW()` usando `FOR UPDATE SKIP LOCKED`, para que varias instancias puedan correrlo sin pisarse, y publica eventos. La validez no depende de este proceso.
+- **Vencimiento de retenciones** (cada 15 s): por cada oferta con retenciones vencidas, bloquea su fila de inventario con `FOR UPDATE SKIP LOCKED` (varias instancias pueden correrlo sin pisarse y nunca hace esperar a un cliente), marca `VENCIDA` las retenciones activas con `expira_en <= NOW()` y publica eventos. La validez no depende de este proceso.
+
+**Regla de bloqueo:** retener, liberar, confirmar y vencer bloquean **primero el inventario** (en orden de `oferta_id`) y después las retenciones. Sin esta regla, una retención que vence durante su propia confirmación podría ser tomada por otro cliente (detalle en [ADR-014](../../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md)).
 - **Publicador de outbox.**
 - **Indexador** (`OfertaActualizada` → OpenSearch).
 
 **Configuración:** `RETENCION_MINUTOS` (15), `RETENCION_MAX_CUPOS_POR_OFERTA` (6), `RETENCION_BARRIDO_SEGUNDOS` (15), credenciales de MySQL del esquema `catalogo`.
 
-**Estructura tentativa (Go, arquitectura en capas; a confirmar en D2):**
+**Estructura (Go, arquitectura en capas, [ADR-002](../../docs/adr/ADR-002-arquitectura-interna.md)):**
 
 ```
 cmd/catalogo/main.go

@@ -6,6 +6,11 @@ services:
     image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      # Usadas por infra/mysql/init/02-usuarios.sh para crear un usuario por servicio.
+      CATALOGO_DB_PASSWORD: ${CATALOGO_DB_PASSWORD}
+      RESERVAS_DB_PASSWORD: ${RESERVAS_DB_PASSWORD}
+      COMPROBANTES_DB_PASSWORD: ${COMPROBANTES_DB_PASSWORD}
+      USUARIOS_DB_PASSWORD: ${USUARIOS_DB_PASSWORD}
     ports: ["3306:3306"]
     volumes:
       - mysql-data:/var/lib/mysql

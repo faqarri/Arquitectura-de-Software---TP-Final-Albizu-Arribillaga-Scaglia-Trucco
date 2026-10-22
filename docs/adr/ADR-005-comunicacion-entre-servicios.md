@@ -36,14 +36,15 @@ Se evaluará un circuit breaker en D10.
 
 | Evento | Productor | Consumidor | Exchange / cola | Uso |
 |---|---|---|---|---|
-| `CompraConfirmada` | Reservas | Comprobantes | Cola durable con DLQ | Emitir factura y enviar correo. Lleva `email`, `items` (`descripcion`, `precio`) y `compraId` |
+| `CompraConfirmada` | Reservas | Comprobantes | Cola durable con DLQ | Emitir factura y enviar correo. Lleva `email` (del JWT del cliente, guardado en la compra), `items` (`descripcion`, `precio`) y `compraId` |
+| `EnvioSolicitado` | Comprobantes | Comprobantes (worker de envío) | Cola durable `comprobantes.envios` con DLQ | Generar el PDF y enviar el correo de un comprobante ya emitido, con reintentos |
 | `OfertaActualizada` | Catálogo | Indexador de Catálogo | Cola durable con DLQ | Actualizar el índice de búsqueda |
 | `DisponibilidadCambiada` | Catálogo | Tiempo Real | Fanout `catalogo.disponibilidad`, cola exclusiva por instancia, **sin DLQ** | Avisar a los navegadores (estado completo + `version`) |
 | `RetencionVencida` | Catálogo | Tiempo Real, Reservas | Fanout `catalogo.disponibilidad`; Tiempo Real sin DLQ, Reservas con cola durable `reservas.retenciones` con DLQ | Avisar al usuario; marcar el ítem del carrito como vencido |
 
-- **Publicación confiable:** Reservas y Catálogo guardan el evento en una tabla *outbox* dentro de la misma transacción del cambio, y un proceso lo publica. Así no se pierde el evento si el broker no está disponible en ese momento.
+- **Publicación confiable:** Reservas, Catálogo y Comprobantes guardan el evento en una tabla *outbox* dentro de la misma transacción del cambio, y un proceso lo publica. Así no se pierde el evento si el broker no está disponible o si el servicio se cae justo después del commit.
 - **Entrega al menos una vez:** el consumidor confirma (`ack`) solo después de procesar.
-- **Idempotencia:** cada evento lleva `eventId`. Comprobantes usa además `compraId` como clave única, así que un evento duplicado no genera otro comprobante ni otro correo. Marcar un ítem como vencido es idempotente por naturaleza. Tiempo Real descarta versiones viejas.
+- **Idempotencia:** cada evento lleva `eventId`. Comprobantes usa además `compraId` como clave única, así que un evento duplicado no genera otro comprobante ni otro correo. El worker de envío no reenvía un comprobante que ya figura `ENVIADO`. Marcar un ítem como vencido es idempotente por naturaleza. Tiempo Real descarta versiones viejas.
 - **Mensajes fallidos:** hasta 3 reintentos con espera creciente; luego el mensaje pasa a una **dead letter queue** (`*.dlq`) para análisis y reprocesamiento manual. **Excepción:** las colas de Tiempo Real no tienen DLQ porque sus eventos son avisos de mejor esfuerzo; el cliente reconsulta el estado al reconectar ([ADR-015](ADR-015-disponibilidad-en-tiempo-real.md)).
 
 ## Alternativas consideradas
@@ -67,3 +68,4 @@ Se evaluará un circuit breaker en D10.
 | Fecha | Cambio | Motivo |
 |---|---|---|
 | 2026-10-22 | La llamada síncrona Reservas → Catálogo deja de ser "obtener precios y definición del pack al confirmar" y pasa a ser la API interna de retenciones (retener, liberar, confirmar), todas idempotentes, por lo que los reintentos ya no se limitan a GET. Se agrega el estado `PENDIENTE` con recuperación cuando la confirmación no tiene respuesta concluyente. Se elimina el evento `OfertaPublicada` (Reservas ya no crea cupos). Se agregan `DisponibilidadCambiada` y `RetencionVencida` sobre un exchange fanout, sin DLQ para Tiempo Real. `CompraConfirmada` pasa a llevar `email` e `items` con `descripcion` y `precio`, alineado con el contrato 1.0.0 de Comprobantes. Catálogo también usa outbox. | Devolución de la Entrega 1: cupos en Catálogo con retención ([ADR-014](ADR-014-cupos-en-catalogo-con-retencion.md)), tiempo real ([ADR-015](ADR-015-disponibilidad-en-tiempo-real.md)) y contrato simplificado ([ADR-008](ADR-008-contrato-propio.md)). |
+| 2026-10-22 | Comprobantes también usa outbox: la emisión guarda el comprobante y el evento interno `EnvioSolicitado` en la misma transacción, y un worker consume la cola `comprobantes.envios` (con DLQ) para generar el PDF y enviar el correo. Se aclara que el email de `CompraConfirmada` sale del JWT del cliente. | Revisión interna del diseño. Si Comprobantes guardaba el comprobante y después encolaba el envío por separado, una caída entre ambos pasos dejaba el comprobante `PENDIENTE` para siempre y el correo nunca salía. Eso contradice el contrato (el estado siempre termina en `ENVIADO` o `FALLIDO`) y el requisito de no perder información. |
