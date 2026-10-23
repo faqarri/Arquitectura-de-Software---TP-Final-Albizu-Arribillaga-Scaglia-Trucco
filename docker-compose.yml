@@ -1,12 +1,18 @@
-# Procedimiento único de puesta en marcha: `cp .env.example .env && docker compose up -d`
-# Entrega 1: infraestructura + mock del contrato. Los servicios se agregan al implementarse.
+# Procedimiento único de puesta en marcha: `cp .env.example .env && docker compose up -d --build`
+# Infraestructura, mock del contrato y los servicios ya implementados.
 
 services:
   mysql:
     image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    ports: ["3306:3306"]
+      # Usadas por infra/mysql/init/02-usuarios.sh para crear un usuario por servicio.
+      CATALOGO_DB_PASSWORD: ${CATALOGO_DB_PASSWORD}
+      RESERVAS_DB_PASSWORD: ${RESERVAS_DB_PASSWORD}
+      COMPROBANTES_DB_PASSWORD: ${COMPROBANTES_DB_PASSWORD}
+      USUARIOS_DB_PASSWORD: ${USUARIOS_DB_PASSWORD}
+    # Puerto en tu máquina; cambialo con MYSQL_PUERTO si ya tenés un MySQL instalado en el 3306.
+    ports: ["${MYSQL_PUERTO:-3306}:3306"]
     volumes:
       - mysql-data:/var/lib/mysql
       - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
@@ -39,19 +45,50 @@ services:
     image: axllent/mailpit:v1.20
     ports: ["1025:1025", "8025:8025"]
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686", "4318:4318"]
+
   comprobantes-mock:
     image: stoplight/prism:5
-    command: mock -h 0.0.0.0 /contracts/openapi.yaml
+    # --multiprocess=false: el modo multiproceso (activado por defecto) falla al arrancar en las versiones recientes de la imagen.
+    command: mock -h 0.0.0.0 --multiprocess=false /contracts/openapi.yaml
     volumes:
       - ./docs/contracts/comprobantes/v1/openapi.yaml:/contracts/openapi.yaml:ro
     ports: ["4010:4010"]
 
-  # --- Servicios (se habilitan a medida que se implementan) ---
+  # --- Servicios ---
+  comprobantes:
+    build:
+      context: .
+      dockerfile: services/comprobantes/Dockerfile
+    environment:
+      GIN_MODE: release
+      PUERTO_HTTP: "8080"
+      DB_HOST: mysql
+      DB_PUERTO: "3306"
+      DB_USUARIO: comprobantes
+      DB_PASSWORD: ${COMPROBANTES_DB_PASSWORD}
+      DB_NOMBRE: comprobantes
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      SMTP_HOST: mailpit
+      SMTP_PUERTO: "1025"
+      COMPROBANTES_API_KEYS: ${COMPROBANTES_API_KEYS}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    ports: ["8081:8080"]
+    depends_on:
+      mysql: { condition: service_healthy }
+      rabbitmq: { condition: service_started }
+      mailpit: { condition: service_started }
+      jaeger: { condition: service_started }
+
+  # --- Servicios que se habilitan a medida que se implementan ---
   # gateway:      { build: ./gateway, ports: ["8080:8080"], env_file: .env }
   # usuarios:     { build: ./services/usuarios, env_file: .env, depends_on: [mysql] }
   # catalogo:     { build: ./services/catalogo, env_file: .env, depends_on: [mongo, mysql, opensearch, rabbitmq] }  # mysql: inventario y retenciones (ADR-014)
   # reservas:     { build: ./services/reservas, env_file: .env, depends_on: [mysql, rabbitmq] }
-  # comprobantes: { build: ./services/comprobantes, env_file: .env, depends_on: [mysql, rabbitmq, mailpit] }
   # tiempo-real:  { build: ./services/tiempo-real, env_file: .env, depends_on: [rabbitmq] }  # sin estado, SSE vía gateway (ADR-015)
   # frontend:     { build: ./frontend, ports: ["5173:5173"] }
 

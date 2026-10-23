@@ -30,19 +30,31 @@ Requisitos: Docker y Docker Compose.
 
 ```bash
 cp .env.example .env      # completar valores locales (no se versiona)
-docker compose up -d
+docker compose up -d --build
 ```
 
-Servicios de infraestructura disponibles en esta etapa:
+> MySQL crea los esquemas y un usuario por servicio **solo la primera vez**, con el volumen vacío. Si ya habías levantado el entorno antes de esos cambios, ejecutá `docker compose down -v` y después `docker compose up -d` (borra los datos locales).
+
+Componentes disponibles en esta etapa:
 
 | Componente | URL local |
 |---|---|
+| Servicio Comprobantes (API pública v1) | http://localhost:8081 (salud: `/health`) |
 | Mock del contrato de Comprobantes (Prism) | http://localhost:4010 |
 | RabbitMQ (management) | http://localhost:15672 |
 | Mailpit (bandeja de correo local) | http://localhost:8025 |
+| Jaeger (trazas distribuidas) | http://localhost:16686 |
 | OpenSearch | http://localhost:9200 |
 
-> Estado: Entrega 1 (diseño y contrato con mock). Los microservicios se incorporan al `docker-compose.yml` a medida que se implementan.
+> Estado: Entrega 2 (23/10/2026). Están documentadas las decisiones D2, D6, D7, D9 (estrategia general, a completar cuando se asigne el proveedor), D10 y D13 (plan de pruebas y costos), además de D11 y D12 ([índice de ADRs](docs/adr/README.md)). Comprobantes tiene su esqueleto con dominio y casos de uso probados (ver [su README](services/comprobantes/README.md)); su API y sus colas están en implementación. Los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
+
+### Código y tests
+
+El backend está en Go. Cada servicio es un módulo propio (`services/<servicio>/go.mod`) y `pkg/` es un módulo compartido con logs, correlación y trazas. El archivo `go.work` de la raíz los une para el editor y para correr todo junto:
+
+```bash
+go test ./pkg/... ./services/comprobantes/...
+```
 
 ## Bonus
 
@@ -68,7 +80,8 @@ La capacidad publicada (API de Comprobantes) se desplegará en la nube con URL p
 
 ## Forma de trabajo
 
-- `main`: rama protegida, solo recibe merges por Pull Request. Contiene la versión evaluable.
-- `feature/<servicio>-<descripcion>`: una rama por funcionalidad.
+- `main`: rama protegida, solo recibe merges por Pull Request. Contiene la versión evaluable y es el punto de partida común.
+- **Una rama por integrante** (`albizu`, `arribillaga`, `scaglia`, `trucco`). Cada uno trabaja en la suya y, antes de empezar una tarea, la actualiza con lo último de `main`.
+- El trabajo terminado se integra a `main` con un Pull Request desde la rama personal.
 - Cada PR requiere al menos una revisión de otro integrante y que pasen los tests.
 - Los secretos se cargan por variables de entorno (`.env`, excluido del repositorio). `.env.example` documenta las variables sin valores reales.

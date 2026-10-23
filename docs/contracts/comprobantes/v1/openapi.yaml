@@ -1,13 +1,16 @@
 openapi: 3.0.3
 info:
   title: API de Emisión de Comprobantes
-  version: 1.0.0
+  version: 1.0.2
   description: |
     Capacidad publicada por el sistema Agencia de Viajes.
     Recibe el email del destinatario y una lista de ítems con descripción y precio,
     genera la factura en PDF y **siempre** la envía por correo a ese email.
 
     - Moneda: todos los importes están expresados en pesos argentinos (ARS).
+    - Redondeo: los precios con más de 2 decimales se redondean a 2 (el 5 redondea
+      hacia arriba). La respuesta devuelve los precios ya redondeados y el total es su suma.
+    - Importe máximo: ningún precio ni el total pueden superar 9999999999.99 (responde 422).
     - Envío asíncrono: `POST` responde con `estadoEnvio: PENDIENTE`; luego pasa a
       `ENVIADO` o `FALLIDO`, consultable con `GET /v1/comprobantes/{comprobanteId}`.
     - Autenticación: header `X-API-Key` provisto a cada grupo consumidor.
@@ -161,7 +164,7 @@ components:
           type: number
           format: double
           minimum: 0
-          description: Importe de la línea en ARS (si hay cantidades, el consumidor envía el importe ya multiplicado).
+          description: Importe de la línea en ARS (si hay cantidades, el consumidor envía el importe ya multiplicado). Si tiene más de 2 decimales se redondea a 2 (10.005 → 10.01).
           example: 30000
     Comprobante:
       type: object
@@ -184,7 +187,7 @@ components:
         total:
           type: number
           format: double
-          description: Suma de los precios de los ítems, en ARS.
+          description: Suma de los precios de los ítems ya redondeados a 2 decimales, en ARS.
         fechaEmision:
           type: string
           format: date-time
@@ -251,7 +254,7 @@ components:
             title: Clave de idempotencia reutilizada
             status: 409
     ReglaIncumplida:
-      description: La solicitud es válida en forma pero incumple una regla (el total es igual a cero).
+      description: La solicitud es válida en forma pero incumple una regla. El total es igual a cero, o un precio o el total superan 9999999999.99 (el máximo admitido).
       content:
         application/problem+json:
           schema:

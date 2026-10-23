@@ -14,6 +14,8 @@ Punto de entrada único del sistema.
 | `/api/tiempo-real/ofertas` | Tiempo Real | **SSE**, pública |
 | `/api/tiempo-real/mis-retenciones` | Tiempo Real | **SSE**, requiere JWT; el gateway propaga el id de usuario |
 
+**Identidad hacia los servicios:** en las rutas que requieren JWT, el gateway valida el token y propaga sus claims en headers: `X-Usuario-Id`, `X-Usuario-Email` y `X-Usuario-Rol`. Antes de hacerlo **elimina cualquiera de esos headers que venga del cliente**, así nadie puede hacerse pasar por otro usuario enviándolos a mano. Los servicios confían en esos headers porque solo son accesibles desde la red interna.
+
 **Rutas que NO se publican:** `/internal/*` de Catálogo (retener, liberar y confirmar retenciones). Solo Reservas las usa dentro de la red interna; el gateway responde `404` a cualquier ruta `/internal`.
 
 **Requisitos de las rutas SSE (`/api/tiempo-real/*`):**
@@ -27,4 +29,4 @@ La API pública de Comprobantes para otros grupos se expone en su propio desplie
 
 **Tecnología:** a definir (candidatos: Traefik, Nginx o un gateway en Go). Debe cumplir los requisitos de SSE anteriores.
 
-**Historial:** 2026-10-22: se agregan las rutas SSE de Tiempo Real y la disponibilidad, se excluyen explícitamente las rutas `/internal` y se quita `/api/sugerencias` (sugerencias fuera del alcance).
+**Historial:** 2026-10-22: se agregan las rutas SSE de Tiempo Real y la disponibilidad, se excluyen explícitamente las rutas `/internal` y se quita `/api/sugerencias` (sugerencias fuera del alcance). 2026-10-22: se definen los headers de identidad (`X-Usuario-Id`, `X-Usuario-Email`, `X-Usuario-Rol`) que el gateway propaga a partir del JWT ([ADR-014 § Revisiones](../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md#revisiones)).

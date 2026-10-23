@@ -1,0 +1,9 @@
+# Las imágenes se construyen desde la raíz del repo: no mandar al build nada que
+# no sea código de los servicios.
+.git
+.env
+docs
+frontend/node_modules
+**/bin
+**/dist
+*.log

@@ -1,4 +1,4 @@
--- Un esquema por servicio. Las credenciales por servicio se configurarán vía variables de entorno.
+-- Un esquema por servicio. Los usuarios y sus permisos se crean en 02-usuarios.sh.
 CREATE DATABASE IF NOT EXISTS reservas;
 CREATE DATABASE IF NOT EXISTS comprobantes;
 CREATE DATABASE IF NOT EXISTS usuarios;

@@ -1,0 +1,8 @@
+go 1.26.0
+
+// Workspace para el editor y para compilar/testear desde la raíz. Cada servicio
+// es un módulo independiente; agregá acá cada servicio nuevo.
+use (
+	./pkg
+	./services/comprobantes
+)
