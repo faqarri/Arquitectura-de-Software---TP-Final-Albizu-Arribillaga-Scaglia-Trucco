@@ -16,7 +16,7 @@ const tamanioLoteOutbox = 50
 
 // colaPorTipo indica en qué cola se publica cada tipo de evento del outbox.
 var colaPorTipo = map[string]string{
-	TipoEnvioSolicitado: ColaEnvios,
+	ports.EventoEnvioSolicitado: ColaEnvios,
 }
 
 func iniciarPublicadorOutbox(ctx context.Context, cfg Config, log *slog.Logger, outbox ports.Outbox) error {

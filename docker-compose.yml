@@ -11,7 +11,8 @@ services:
       RESERVAS_DB_PASSWORD: ${RESERVAS_DB_PASSWORD}
       COMPROBANTES_DB_PASSWORD: ${COMPROBANTES_DB_PASSWORD}
       USUARIOS_DB_PASSWORD: ${USUARIOS_DB_PASSWORD}
-    ports: ["3306:3306"]
+    # Puerto en tu máquina; cambialo con MYSQL_PUERTO si ya tenés un MySQL instalado en el 3306.
+    ports: ["${MYSQL_PUERTO:-3306}:3306"]
     volumes:
       - mysql-data:/var/lib/mysql
       - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
@@ -46,7 +47,8 @@ services:
 
   comprobantes-mock:
     image: stoplight/prism:5
-    command: mock -h 0.0.0.0 /contracts/openapi.yaml
+    # --multiprocess=false: el modo multiproceso (activado por defecto) falla al arrancar en las versiones recientes de la imagen.
+    command: mock -h 0.0.0.0 --multiprocess=false /contracts/openapi.yaml
     volumes:
       - ./docs/contracts/comprobantes/v1/openapi.yaml:/contracts/openapi.yaml:ro
     ports: ["4010:4010"]

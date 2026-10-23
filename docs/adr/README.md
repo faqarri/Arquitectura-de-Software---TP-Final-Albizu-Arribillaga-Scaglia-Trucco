@@ -6,7 +6,7 @@
 | [ADR-002](ADR-002-arquitectura-interna.md) | D2 Arquitectura interna de los servicios | Aceptada |
 | [ADR-003](ADR-003-persistencia.md) | D3 Persistencia | Propuesta (versión inicial, revisada 2026-10-22) |
 | [ADR-005](ADR-005-comunicacion-entre-servicios.md) | D5 Comunicación entre servicios | Propuesta (versión inicial, revisada 2026-10-22) |
-| [ADR-008](ADR-008-contrato-propio.md) | D8 Contrato propio | Aceptada (revisada 2026-10-22: contrato 1.0.1; idempotencia por consumidor; redondeo) |
+| [ADR-008](ADR-008-contrato-propio.md) | D8 Contrato propio | Aceptada (revisada: contrato 1.0.2; idempotencia por consumidor; redondeo; importe máximo) |
 | [ADR-014](ADR-014-cupos-en-catalogo-con-retencion.md) | D1 Límites de los servicios — cupos en Catálogo con retención temporal | Aceptada (revisada 2026-10-22: regla de bloqueo) |
 | [ADR-015](ADR-015-disponibilidad-en-tiempo-real.md) | Disponibilidad en tiempo real (agotado vs. retenido) — bonus | Aceptada |
 

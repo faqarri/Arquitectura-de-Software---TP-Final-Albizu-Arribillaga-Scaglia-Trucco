@@ -226,7 +226,7 @@ func TestCompraInvalidaVaALaDLQSinReintentos(t *testing.T) {
 }
 
 func TestCompraQueIncumpleReglasVaALaDLQSinReintentos(t *testing.T) {
-	for _, err := range []error{domain.ErrTotalCero, domain.ErrSinItems, domain.ErrPrecioNegativo, application.ErrConflictoIdempotencia} {
+	for _, err := range []error{domain.ErrTotalCero, domain.ErrSinItems, domain.ErrPrecioNegativo, domain.ErrImporteFueraDeRango, application.ErrConflictoIdempotencia} {
 		pub := &publicadorFalso{}
 		d, a := entrega(compraValida, nil)
 		manejarCompra(context.Background(), logDescartado, cfgTest, &emisionFalsa{err: err}, pub, d)
@@ -258,7 +258,7 @@ func TestCompraConErrorTemporalSeReintentaYDespuesVaALaDLQ(t *testing.T) {
 
 func TestOutboxPublicaYMarcaDespuesDeLaConfirmacion(t *testing.T) {
 	ob := &outboxFalso{eventos: []ports.EventoOutbox{
-		{ID: 7, Tipo: TipoEnvioSolicitado, Payload: []byte(`{"comprobanteId":"c-1"}`), Headers: map[string]any{observabilidad.HeaderCorrelacion: "corr-1"}},
+		{ID: 7, Tipo: ports.EventoEnvioSolicitado, Payload: []byte(`{"comprobanteId":"c-1"}`), Headers: map[string]any{observabilidad.HeaderCorrelacion: "corr-1"}},
 	}}
 	pub := &publicadorFalso{}
 	p := &publicadorOutbox{outbox: ob, log: logDescartado}
@@ -279,7 +279,7 @@ func TestOutboxPublicaYMarcaDespuesDeLaConfirmacion(t *testing.T) {
 }
 
 func TestOutboxNoMarcaSiElBrokerNoConfirma(t *testing.T) {
-	ob := &outboxFalso{eventos: []ports.EventoOutbox{{ID: 1, Tipo: TipoEnvioSolicitado, Payload: []byte(`{}`)}}}
+	ob := &outboxFalso{eventos: []ports.EventoOutbox{{ID: 1, Tipo: ports.EventoEnvioSolicitado, Payload: []byte(`{}`)}}}
 	p := &publicadorOutbox{outbox: ob, log: logDescartado}
 	if err := p.publicarPendientes(context.Background(), &publicadorFalso{err: errors.New("nack")}); err == nil {
 		t.Fatal("se esperaba error para reconectar")
@@ -300,7 +300,7 @@ func TestOutboxConLaBaseCaidaNoCortaElPublicador(t *testing.T) {
 func TestOutboxDejaPendienteUnTipoDesconocido(t *testing.T) {
 	ob := &outboxFalso{eventos: []ports.EventoOutbox{
 		{ID: 1, Tipo: "Desconocido", Payload: []byte(`{}`)},
-		{ID: 2, Tipo: TipoEnvioSolicitado, Payload: []byte(`{}`)},
+		{ID: 2, Tipo: ports.EventoEnvioSolicitado, Payload: []byte(`{}`)},
 	}}
 	pub := &publicadorFalso{}
 	p := &publicadorOutbox{outbox: ob, log: logDescartado}

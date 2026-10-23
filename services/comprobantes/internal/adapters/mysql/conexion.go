@@ -28,7 +28,11 @@ func (c Config) dsn() string {
 // Conectar abre la conexión y configura el pool.
 func Conectar(cfg Config) (*gorm.DB, error) {
 	db, err := gorm.Open(gormmysql.Open(cfg.dsn()), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		// Silencioso: el logger de GORM escribe texto plano (rompe los logs JSON) y
+		// trataría como error cada clave duplicada, que en este servicio es el
+		// camino normal de un reintento idempotente. Los errores los registra el
+		// servicio con su propio logger.
+		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("conectar a MySQL: %w", err)

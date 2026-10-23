@@ -71,6 +71,7 @@ func errorPermanente(err error) bool {
 	return errors.Is(err, domain.ErrSinItems) ||
 		errors.Is(err, domain.ErrPrecioNegativo) ||
 		errors.Is(err, domain.ErrTotalCero) ||
+		errors.Is(err, domain.ErrImporteFueraDeRango) ||
 		// El mismo compraId con otro contenido: es un error del productor.
 		errors.Is(err, application.ErrConflictoIdempotencia)
 }

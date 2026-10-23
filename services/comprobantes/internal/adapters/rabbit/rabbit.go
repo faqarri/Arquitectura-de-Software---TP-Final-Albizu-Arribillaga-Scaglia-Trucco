@@ -26,8 +26,6 @@ const (
 	// HeaderIntentos cuenta los reintentos que ya tuvo un mensaje. Lo agrega el
 	// consumidor al mandarlo a una cola de reintento.
 	HeaderIntentos = "x-intentos"
-
-	TipoEnvioSolicitado = "EnvioSolicitado"
 )
 
 // Valores por defecto de Config.

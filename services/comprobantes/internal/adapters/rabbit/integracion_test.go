@@ -43,7 +43,7 @@ func TestIntegracionRabbitMQ(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(t.Output(), nil))
 
 	ob := &outboxFalso{eventos: []ports.EventoOutbox{{
-		ID: 1, Tipo: TipoEnvioSolicitado, Payload: []byte(`{"comprobanteId":"c-1"}`),
+		ID: 1, Tipo: ports.EventoEnvioSolicitado, Payload: []byte(`{"comprobanteId":"c-1"}`),
 		Headers: map[string]any{observabilidad.HeaderCorrelacion: "corr-integracion"},
 	}}}
 	envio := &envioFalso{err: errTemporal} // simula Mailpit apagado
