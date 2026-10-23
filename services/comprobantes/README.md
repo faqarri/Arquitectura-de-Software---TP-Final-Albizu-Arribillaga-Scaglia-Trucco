@@ -77,7 +77,113 @@ arquitectura_test.go         # verifica que domain, ports y application no impor
 
 El adaptador HTTP se llama `api` y no `http` para no chocar con el paquete `net/http` de Go.
 
-**Colas:** `comprobantes.compras` (recibe `CompraConfirmada` de Reservas) y `comprobantes.envios` (envíos de correo), cada una con su `.dlq`.
+## Colas (RabbitMQ)
+
+Implementación en `internal/adapters/rabbit`. Cada componente (consumidor de compras, worker de envíos y publicador de outbox) declara la topología completa al conectarse. La declaración es idempotente: volver a declarar una cola con los mismos argumentos no cambia nada.
+
+### Topología
+
+| Nombre | Tipo | Argumentos | Para qué |
+|---|---|---|---|
+| `comprobantes.compras` | Cola durable | DLX `comprobantes.dlx`, routing key `comprobantes.compras.dlq` | Recibe `CompraConfirmada` de Reservas |
+| `comprobantes.envios` | Cola durable | DLX `comprobantes.dlx`, routing key `comprobantes.envios.dlq` | Recibe `EnvioSolicitado` desde nuestro outbox |
+| `comprobantes.dlx` | Exchange `direct` durable | — | Enruta a la DLQ los mensajes rechazados (`nack` sin requeue) |
+| `comprobantes.compras.dlq`, `comprobantes.envios.dlq` | Colas durables | — | Mensajes que no se pudieron procesar, para análisis y reprocesamiento manual |
+| `<cola>.reintento.5s`, `.15s`, `.30s` | Colas durables, sin consumidores | `x-message-ttl` = la espera; DLX = exchange por defecto, routing key = `<cola>` | Espera antes de cada reintento |
+
+```mermaid
+flowchart LR
+    P[Productor] --> Q[comprobantes.envios]
+    Q -->|ok: ack| FIN((fin))
+    Q -->|falla temporal| R1[reintento.5s] -->|TTL vence| Q
+    Q -->|2.ª falla| R2[reintento.15s] -->|TTL vence| Q
+    Q -->|3.ª falla| R3[reintento.30s] -->|TTL vence| Q
+    Q -->|4.ª falla o error permanente: nack| DLX{{comprobantes.dlx}} --> DLQ[comprobantes.envios.dlq]
+```
+
+### Reintentos con espera creciente
+
+Un error temporal se reintenta hasta `MaxIntentos` = 3 veces, con esperas de 5, 15 y 30 segundos (`rabbit.EsperasReintento`). En total son 4 intentos en unos 50 segundos, más lo que tarde cada intento (el envío SMTP corta a los 10 s).
+
+1. Si el procesamiento falla con un error temporal, el consumidor **publica una copia** del mensaje en la cola de reintento que corresponde (con publisher confirms), con el header `x-intentos` incrementado. **Después** hace `ack` del original. Si el servicio cae entre los dos pasos, el mensaje queda duplicado, nunca perdido, y los consumidores son idempotentes.
+2. La cola de reintento no tiene consumidores. Cuando vence el TTL, RabbitMQ la devuelve a la cola original por dead-lettering.
+3. Si `x-intentos` ya llegó a 3, el consumidor hace `nack` sin requeue y el DLX lleva el mensaje a la `.dlq`, con sus headers (`x-intentos`, `X-Correlation-Id` y el `x-death` que agrega RabbitMQ).
+
+Por qué este mecanismo:
+
+- **`nack` con requeue:** reintenta enseguida, sin espera, y en colas clásicas no cuenta los intentos. Descartado.
+- **Esperar dentro del consumidor (`sleep`):** ocupa un lugar del prefetch mientras espera. Además, si el servicio se reinicia, la espera y la cuenta de intentos se pierden. Descartado.
+- **Una sola cola de reintento con TTL por mensaje:** RabbitMQ solo vence los mensajes que están en la cabeza de la cola, así que uno con espera larga traba a los de espera corta. Por eso hay **una cola por espera**, con el TTL fijo en la cola.
+- **Plugin `rabbitmq_delayed_message_exchange`:** necesita una imagen de RabbitMQ con el plugin instalado. Las colas con TTL usan solo funciones estándar.
+
+El nombre de cada cola de reintento incluye su espera. Si se cambian las esperas, se declaran colas nuevas en lugar de chocar con los argumentos de las anteriores (RabbitMQ rechaza redeclarar una cola con otros argumentos: `PRECONDITION_FAILED`).
+
+### Clasificación de errores
+
+| Cola | Error | Qué se hace |
+|---|---|---|
+| `comprobantes.envios` | Envío correcto, o comprobante ya `ENVIADO` | `ack` |
+| | Cuerpo mal formado (sin `comprobanteId`) o comprobante inexistente | DLQ directa |
+| | Cualquier otro error (SMTP caído, timeout, base de datos) | Reintento. Al agotarlos, `MarcarFallido` y DLQ. Si no se puede guardar `FALLIDO`, se sigue reintentando con la última espera, para que el comprobante no quede `PENDIENTE` para siempre |
+| `comprobantes.compras` | Comprobante emitido, o duplicado (`YaExistia`) | `ack` |
+| | JSON inválido, `compraId` que no es UUID, email inválido, ítem sin `descripcion` (1 a 200 caracteres) o sin `precio` | DLQ directa |
+| | Regla de dominio incumplida (`ErrSinItems`, `ErrPrecioNegativo`, `ErrTotalCero`) o mismo `compraId` con otro contenido (`ErrConflictoIdempotencia`) | DLQ directa |
+| | Cualquier otro error (base de datos) | Reintento; al agotarlos, DLQ |
+
+Para reprocesar un mensaje de una DLQ, se mueve a la cola original **sin** el header `x-intentos`. Por ejemplo, desde la consola: *Get messages* en la DLQ y *Publish message* en la cola original.
+
+### Mensajes
+
+**`CompraConfirmada`** (cola `comprobantes.compras`, publicada por Reservas por el exchange por defecto, persistente, `content-type: application/json`):
+
+```json
+{
+  "eventId": "0d8c3d64-5f0e-4d5e-9a57-7a0f2b3c4d5e",
+  "compraId": "6b0c1d2e-3f40-4a5b-8c6d-7e8f90a1b2c3",
+  "email": "ana.perez@example.com",
+  "items": [
+    { "descripcion": "Pasaje Córdoba - Bariloche", "precio": 1234.5 }
+  ]
+}
+```
+
+| Campo | Reglas |
+|---|---|
+| `eventId` | UUID del evento. Se registra en los logs; la idempotencia la da `compraId` |
+| `compraId` | UUID, obligatorio. Es la `IdempotencyKey` del comprobante (consumidor `interno`): el mismo `compraId` dos veces genera un solo comprobante y un solo correo |
+| `email` | Obligatorio, del JWT del cliente, guardado en la compra |
+| `items[].descripcion` | Entre 1 y 200 caracteres |
+| `items[].precio` | Número en ARS, `>= 0`. Se lee como decimal exacto, sin pasar por punto flotante, y se redondea a 2 decimales como en la API |
+
+Headers: `X-Correlation-Id` (opcional) con la correlación de la solicitud que originó la compra. Los campos desconocidos se ignoran, para que Reservas pueda agregar campos sin romper el consumidor.
+
+**`EnvioSolicitado`** (cola `comprobantes.envios`, interno): `{"comprobanteId": "<uuid>"}`. Lo publica el publicador de outbox con `type: EnvioSolicitado`, `message-id: outbox-<id>` y los headers guardados en el outbox (`X-Correlation-Id` de la solicitud HTTP o del evento que originó el comprobante). Así los logs del worker llevan el mismo `correlacion_id` que la solicitud original.
+
+### Publicador de outbox
+
+Cada 1 segundo lee hasta 50 eventos pendientes y publica cada uno como mensaje persistente en un canal con **publisher confirms**. Lo marca publicado **solo después** de que el broker lo confirma. Si el broker no confirma, el evento sigue pendiente y se reintenta después de reconectar. Si la base no responde, lo registra (una vez por cada error distinto) y prueba de nuevo en el próximo ciclo, sin cortar la conexión con RabbitMQ. Un evento publicado que no se pudo marcar se vuelve a publicar más tarde; el worker lo tolera porque no reenvía un comprobante ya `ENVIADO`.
+
+### Conexión, consumo y apagado
+
+- Si RabbitMQ no está disponible al arrancar, o si se cae la conexión, cada componente lo registra (`no se pudo conectar a RabbitMQ` / `se perdió la conexión con RabbitMQ`) y reconecta con backoff exponencial: de 1 s hasta 30 s, con ±20 % de jitter. El servicio (API incluida) sigue funcionando mientras tanto.
+- Los consumidores usan `prefetch` = 5 y procesan hasta 5 mensajes en paralelo. El `ack` se hace solo después de procesar.
+- Al apagar, los consumidores dejan de recibir mensajes y terminan los que están en curso (hasta 30 s). Los mensajes entregados y todavía sin `ack` vuelven a la cola.
+- Cada mensaje se procesa con `observabilidad.ProcesarMensaje`, que recupera la correlación (y la traza, cuando esté implementada) de los headers.
+
+### Cómo probarlo
+
+```bash
+go test ./...          # unitarios: adaptadores con dobles, sin Docker
+go test -short ./...   # saltea el test de integración
+```
+
+El test de integración de `internal/adapters/rabbit` levanta RabbitMQ con testcontainers-go (necesita Docker; si Docker no está disponible, se saltea solo). Prueba el outbox, los 4 intentos, `FALLIDO` y la DLQ con esperas acortadas.
+
+En el entorno completo (`docker compose up -d --build`):
+
+- Correo: Mailpit en http://localhost:8025. Colas: consola de RabbitMQ en http://localhost:15672 (usuario y contraseña de `.env`).
+- Fallo de envío: `docker compose stop mailpit`, emitir un comprobante y esperar unos 50 s. El `GET` muestra `FALLIDO` y el mensaje queda en `comprobantes.envios.dlq`.
+- `CompraConfirmada` a mano: en la consola, cola `comprobantes.compras` → *Publish message*, con *Delivery mode* 2 (persistente), el header `content_type` = `application/json` y el JSON de ejemplo. Publicarlo dos veces genera un solo comprobante.
 
 ## Estado de la implementación
 
