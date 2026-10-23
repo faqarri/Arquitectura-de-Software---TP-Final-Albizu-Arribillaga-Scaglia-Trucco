@@ -263,9 +263,13 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 
 ## 8. Pendientes de diseño
 
-- D4 Consistencia y concurrencia: formalizar lo descrito en ADR-014 (regla de bloqueo, idempotencia, recuperación) y en Comprobantes (idempotencia por consumidor, outbox del envío).
-- D6 Búsqueda, D7 Caché, D10 Resiliencia, D11 Observabilidad, D12 Balanceo, D13 Capacidad.
+- D4 Consistencia y concurrencia: formalizar lo descrito en ADR-014 (regla de bloqueo, idempotencia, recuperación), en Comprobantes (idempotencia por consumidor, outbox del envío) y en ADR-006 (outbox dentro del documento de la oferta).
+- D9 Consumo del proveedor: la estrategia está en [ADR-009](adr/ADR-009-consumo-del-proveedor.md); falta completar flujo, servicio consumidor y experiencia ante fallas cuando la cátedra asigne el proveedor.
+- D11 Observabilidad y D12 Balanceo de carga: en elaboración (ADR-011 y ADR-012).
+- D13 Capacidad: el plan, las hipótesis y los costos están en [ADR-013](adr/ADR-013-capacidad-y-costos.md); faltan ejecutar las pruebas y registrar los resultados, incluida la medición de caché de ADR-007.
+- Validación de D1, D3 y D5 contra el código (ADR-014, ADR-003, ADR-005): se hace cuando el código de los servicios esté integrado en `main`.
 - Tecnología del API Gateway (debe soportar SSE: sin buffering y con timeouts largos por ruta).
+- Operación administrativa para reintentar el envío de un comprobante `FALLIDO` (acción de mejora de [ADR-010](adr/ADR-010-resiliencia.md)).
 
 ## 9. Limitaciones conocidas y deuda técnica
 
@@ -280,6 +284,13 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 - **Correo "al menos una vez".** Si el worker de Comprobantes se cae después de que el servidor de correo aceptó el mensaje y antes de marcar `ENVIADO`, al reintentar el correo se envía de nuevo. Nunca se emite un segundo comprobante, pero en ese caso puntual el cliente puede recibir el mismo correo dos veces. Con SMTP no se puede garantizar "exactamente una vez"; la ventana es de milisegundos.
 - **Numeración con huecos.** El número de comprobante sale de una columna `AUTO_INCREMENT`; una inserción que falla (por ejemplo, por clave de idempotencia repetida) consume un número y deja un hueco en la secuencia.
 - **Rate limit por instancia.** El límite de 60 solicitudes por minuto de la API de Comprobantes se cuenta en memoria de cada instancia; con varias instancias, el límite efectivo se multiplica.
+- **Búsqueda eventualmente consistente.** Un cambio de oferta tarda unos segundos en aparecer en la búsqueda (objetivo: p95 ≤ 5 s, todavía no medido). Si OpenSearch cae, la búsqueda responde `503` y el resto del flujo sigue ([ADR-006](adr/ADR-006-busqueda.md)).
+- **La búsqueda no muestra disponibilidad.** Una oferta agotada aparece en los resultados; el cliente ve el estado real al abrir el detalle ([ADR-006](adr/ADR-006-busqueda.md)).
+- **Paginación acotada.** La búsqueda llega como máximo a la página 50 (1000 resultados); más allá hay que refinar los filtros.
+- **Detalle cacheado desactualizado.** Por una carrera entre lectura y modificación, el detalle de una oferta puede mostrar un dato viejo, en general por alrededor de un segundo y como máximo 10 minutos (TTL). El precio que se cobra nunca sale de la caché ([ADR-007](adr/ADR-007-cache.md)).
+- **Envíos `FALLIDO` sin reintento.** Un comprobante cuyo correo agotó los reintentos queda `FALLIDO`; reprocesar su mensaje de la DLQ no reenvía el correo. Falta una operación de reintento ([ADR-010](adr/ADR-010-resiliencia.md)).
+- **Capacidad sin medir.** Todos los valores de capacidad, latencia y retraso son objetivos hasta que se ejecuten las pruebas de [ADR-013](adr/ADR-013-capacidad-y-costos.md).
+- **Despliegue en una sola máquina virtual** (propuesta de ADR-013). Es un único punto de falla, y las copias de seguridad y las actualizaciones de la capacidad publicada las operamos nosotros.
 
 _Se completará a medida que avance la implementación._
 
@@ -290,3 +301,4 @@ _Se completará a medida que avance la implementación._
 | 2026-10-09 | Versión inicial (Entrega 1). | — |
 | 2026-10-22 | Cupos, retenciones y disponibilidad pasan de Reservas a Catálogo (MySQL esquema `catalogo`). Se agrega el servicio Tiempo Real. Se quitan las sugerencias, la consulta de precios Reservas → Catálogo y el evento `OfertaPublicada`. Se agregan los eventos `DisponibilidadCambiada` y `RetencionVencida`. Se reemplaza el diagrama de confirmación de compra y se agregan los de retención y tiempo real. Se completan las limitaciones conocidas. Se aclara que la API pública de Comprobantes no pasa por el gateway. | Devolución de la Entrega 1 ([ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md), [ADR-015](adr/ADR-015-disponibilidad-en-tiempo-real.md), [ADR-008](adr/ADR-008-contrato-propio.md)). |
 | 2026-10-22 | Se agrega la arquitectura interna (ADR-002) y los headers de identidad del gateway. El diagrama de confirmación muestra el bloqueo del inventario antes de las retenciones, el email guardado en la compra y el outbox de Comprobantes. Se agrega la comunicación interna `EnvioSolicitado`. Se quita D2 de pendientes y se suman cuatro limitaciones. | Revisión interna del diseño ([ADR-002](adr/ADR-002-arquitectura-interna.md), revisiones de [ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md#revisiones), [ADR-005](adr/ADR-005-comunicacion-entre-servicios.md#revisiones) y [ADR-008](adr/ADR-008-contrato-propio.md#revisiones)). |
+| 2026-10-23 | Pendientes de diseño: se quitan D6, D7 y D10 (decididas) y se detalla qué falta de D9, D11, D12, D13 y de la validación de D1, D3 y D5. Se suman siete limitaciones (búsqueda eventualmente consistente y sin disponibilidad, paginación acotada, caché del detalle, envíos `FALLIDO`, capacidad sin medir, despliegue en una sola VM). | Entrega 2: [ADR-006](adr/ADR-006-busqueda.md), [ADR-007](adr/ADR-007-cache.md), [ADR-009](adr/ADR-009-consumo-del-proveedor.md), [ADR-010](adr/ADR-010-resiliencia.md), [ADR-013](adr/ADR-013-capacidad-y-costos.md) y revisión de [ADR-005](adr/ADR-005-comunicacion-entre-servicios.md#revisiones). |
