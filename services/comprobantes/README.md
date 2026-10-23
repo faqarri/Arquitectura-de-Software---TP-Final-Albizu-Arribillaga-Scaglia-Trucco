@@ -63,14 +63,39 @@ El dominio y los casos de uso no conocen HTTP, RabbitMQ, MySQL ni SMTP: dependen
 
 ```
 cmd/comprobantes/main.go     # arma las dependencias y arranca la API, los consumidores y el publicador de outbox
-internal/domain/             # Comprobante, Item, EstadoEnvio; reglas: total > 0, transiciones de estado
+cmd/comprobantes/config.go   # configuración por variables de entorno
+internal/domain/             # Comprobante, Item, EstadoEnvio; reglas: redondeo, total > 0, transiciones de estado
 internal/application/        # casos de uso: EmitirComprobante, ObtenerComprobante, EnviarComprobante
-internal/ports/              # interfaces: RepositorioComprobantes, GeneradorPDF, Mailer
-internal/adapters/http/      # entrada: API pública v1 (Gin), API Key, rate limit, problem+json
+internal/ports/              # interfaces: RepositorioComprobantes, GeneradorPDF, Mailer, Outbox
+internal/adapters/api/       # entrada: API pública v1 (Gin), API Key, rate limit, problem+json
 internal/adapters/rabbit/    # entrada: consumidores de CompraConfirmada y comprobantes.envios; salida: publicador de outbox
-internal/adapters/mysql/     # salida: comprobantes, ítems y outbox
+internal/adapters/mysql/     # salida: comprobantes, ítems y outbox (GORM)
 internal/adapters/pdf/       # salida: generación del PDF
 internal/adapters/smtp/      # salida: envío de correo (Mailpit en local)
+arquitectura_test.go         # verifica que domain, ports y application no importen infraestructura
+```
+
+El adaptador HTTP se llama `api` y no `http` para no chocar con el paquete `net/http` de Go.
+
+**Colas:** `comprobantes.compras` (recibe `CompraConfirmada` de Reservas) y `comprobantes.envios` (envíos de correo), cada una con su `.dlq`.
+
+## Estado de la implementación
+
+| Parte | Estado |
+|---|---|
+| Dominio y casos de uso | Implementados, con tests unitarios |
+| Conexión a MySQL, esquema (GORM `AutoMigrate`) y `GET /health` | Implementados |
+| Repositorio MySQL, handlers de la API, API Key y rate limit | Pendiente: buscar `TODO(api-mysql)` |
+| Consumidor de `CompraConfirmada`, worker de envíos, publicador de outbox, PDF y SMTP | Pendiente: buscar `TODO(rabbit)` |
+| Trazas con OpenTelemetry | Pendiente: `TODO(observabilidad)` en `pkg/observabilidad` |
+
+## Cómo correrlo
+
+```bash
+docker compose up -d --build comprobantes   # desde la raíz: levanta también MySQL, RabbitMQ y Mailpit
+curl http://localhost:8081/health
+
+go test ./...                                # desde services/comprobantes: tests unitarios y de arquitectura
 ```
 
 **Historial:**

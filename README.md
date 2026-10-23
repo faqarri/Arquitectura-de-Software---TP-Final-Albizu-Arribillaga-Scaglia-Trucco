@@ -30,21 +30,30 @@ Requisitos: Docker y Docker Compose.
 
 ```bash
 cp .env.example .env      # completar valores locales (no se versiona)
-docker compose up -d
+docker compose up -d --build
 ```
 
 > MySQL crea los esquemas y un usuario por servicio **solo la primera vez**, con el volumen vacío. Si ya habías levantado el entorno antes de esos cambios, ejecutá `docker compose down -v` y después `docker compose up -d` (borra los datos locales).
 
-Servicios de infraestructura disponibles en esta etapa:
+Componentes disponibles en esta etapa:
 
 | Componente | URL local |
 |---|---|
+| Servicio Comprobantes (API pública v1) | http://localhost:8081 (salud: `/health`) |
 | Mock del contrato de Comprobantes (Prism) | http://localhost:4010 |
 | RabbitMQ (management) | http://localhost:15672 |
 | Mailpit (bandeja de correo local) | http://localhost:8025 |
 | OpenSearch | http://localhost:9200 |
 
-> Estado: Entrega 1 (diseño y contrato con mock). Los microservicios se incorporan al `docker-compose.yml` a medida que se implementan.
+> Estado: Entrega 2 en curso. Comprobantes tiene su esqueleto (ver [su README](services/comprobantes/README.md)); los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
+
+### Código y tests
+
+El backend está en Go. Cada servicio es un módulo propio (`services/<servicio>/go.mod`) y `pkg/` es un módulo compartido con logs, correlación y trazas. El archivo `go.work` de la raíz los une para el editor y para correr todo junto:
+
+```bash
+go test ./pkg/... ./services/comprobantes/...
+```
 
 ## Bonus
 

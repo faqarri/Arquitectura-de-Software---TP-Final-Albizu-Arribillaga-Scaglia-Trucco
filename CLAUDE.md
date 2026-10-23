@@ -76,6 +76,15 @@ consume la de otro grupo.
 - **MySQL:** cada servicio se conecta con su propio usuario (`<servicio>` /
   `<SERVICIO>_DB_PASSWORD`), nunca con root.
 
+## Código
+
+- Un módulo Go por servicio (`services/<servicio>/go.mod`, módulo `agencia/<servicio>`)
+  más el módulo compartido `pkg/` (`agencia/pkg`), unidos con `go.work`. Cada servicio
+  usa `replace agencia/pkg => ../../pkg`, y su Dockerfile se construye desde la raíz.
+- Logs con `pkg/observabilidad` (slog JSON + `X-Correlation-Id`). Healthcheck en
+  `GET /health`, sin autenticación, con la respuesta en español.
+- Las tareas pendientes están marcadas `TODO(<tema>)` en el código.
+
 ## Stack
 
 Go (Gin/GORM), React + Vite, MySQL, MongoDB, OpenSearch, RabbitMQ, Mailpit en local,

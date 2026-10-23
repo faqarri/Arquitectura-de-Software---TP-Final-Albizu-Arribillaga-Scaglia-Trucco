@@ -235,9 +235,11 @@ sequenceDiagram
 .
 ├── docker-compose.yml        # procedimiento único de puesta en marcha
 ├── .env.example              # variables sin valores reales
+├── go.work                   # une los módulos Go (cada servicio + pkg) para el editor y los tests
+├── pkg/                      # módulo Go compartido: logs, correlación y trazas
 ├── gateway/
 ├── frontend/
-├── infra/mysql/init/         # un esquema por servicio
+├── infra/mysql/init/         # un esquema y un usuario por servicio
 ├── services/
 │   ├── catalogo/
 │   ├── reservas/
