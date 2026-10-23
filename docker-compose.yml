@@ -45,6 +45,12 @@ services:
     image: axllent/mailpit:v1.20
     ports: ["1025:1025", "8025:8025"]
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686", "4318:4318"]
+
   comprobantes-mock:
     image: stoplight/prism:5
     # --multiprocess=false: el modo multiproceso (activado por defecto) falla al arrancar en las versiones recientes de la imagen.
@@ -70,11 +76,13 @@ services:
       SMTP_HOST: mailpit
       SMTP_PUERTO: "1025"
       COMPROBANTES_API_KEYS: ${COMPROBANTES_API_KEYS}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports: ["8081:8080"]
     depends_on:
       mysql: { condition: service_healthy }
       rabbitmq: { condition: service_started }
       mailpit: { condition: service_started }
+      jaeger: { condition: service_started }
 
   # --- Servicios que se habilitan a medida que se implementan ---
   # gateway:      { build: ./gateway, ports: ["8080:8080"], env_file: .env }

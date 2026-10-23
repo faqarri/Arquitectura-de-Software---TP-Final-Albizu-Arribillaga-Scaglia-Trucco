@@ -159,7 +159,7 @@ Para reprocesar un mensaje de una DLQ, se mueve a la cola original **sin** el he
 
 Headers: `X-Correlation-Id` (opcional) con la correlación de la solicitud que originó la compra. Los campos desconocidos se ignoran, para que Reservas pueda agregar campos sin romper el consumidor.
 
-**`EnvioSolicitado`** (cola `comprobantes.envios`, interno): `{"comprobanteId": "<uuid>"}`. Lo publica el publicador de outbox con `type: EnvioSolicitado`, `message-id: outbox-<id>` y los headers guardados en el outbox (`X-Correlation-Id` de la solicitud HTTP o del evento que originó el comprobante). Así los logs del worker llevan el mismo `correlacion_id` que la solicitud original.
+**`EnvioSolicitado`** (cola `comprobantes.envios`, interno): `{"comprobanteId": "<uuid>"}`. Lo publica el publicador de outbox con `type: EnvioSolicitado`, `message-id: outbox-<id>` y los headers guardados en el outbox (`X-Correlation-Id` y `traceparent` de la solicitud HTTP o del evento que originó el comprobante). Así los logs y las trazas del worker pueden continuar el flujo que originó el comprobante.
 
 ### Publicador de outbox
 
@@ -170,7 +170,15 @@ Cada 1 segundo lee hasta 50 eventos pendientes y publica cada uno como mensaje p
 - Si RabbitMQ no está disponible al arrancar, o si se cae la conexión, cada componente lo registra (`no se pudo conectar a RabbitMQ` / `se perdió la conexión con RabbitMQ`) y reconecta con backoff exponencial: de 1 s hasta 30 s, con ±20 % de jitter. El servicio (API incluida) sigue funcionando mientras tanto.
 - Los consumidores usan `prefetch` = 5 y procesan hasta 5 mensajes en paralelo. El `ack` se hace solo después de procesar.
 - Al apagar, los consumidores dejan de recibir mensajes y terminan los que están en curso (hasta 30 s). Los mensajes entregados y todavía sin `ack` vuelven a la cola.
-- Cada mensaje se procesa con `observabilidad.ProcesarMensaje`, que recupera la correlación (y la traza, cuando esté implementada) de los headers.
+- Cada mensaje se procesa con `observabilidad.ProcesarMensaje`, que recupera la correlación y el contexto W3C Trace Context de los headers, abre un span consumidor y registra los errores del procesamiento.
+
+### Trazas distribuidas con Jaeger
+
+Comprobantes exporta trazas con OpenTelemetry por OTLP/HTTP a Jaeger. El span HTTP lo crea el middleware compartido `observabilidad.MiddlewareGin`; el plugin de GORM agrega spans para las consultas a MySQL usando el contexto recibido por el repositorio. El contexto W3C (`traceparent`) también se guarda en los headers del outbox y viaja con los mensajes RabbitMQ.
+
+Con el entorno levantado, abrí http://localhost:16686, seleccioná el servicio `comprobantes` y buscá las trazas recientes. Para generar una traza, enviá un `POST /v1/comprobantes` válido (usá la API Key que configuraste en `.env` y una `Idempotency-Key` nueva). La traza debe incluir el span HTTP y spans hijos de las consultas MySQL. Cuando se procese el evento de outbox, el worker agrega su span consumidor a esa misma traza. La recepción OTLP/HTTP de Jaeger está disponible dentro de Compose en `http://jaeger:4318`.
+
+Si `OTEL_EXPORTER_OTLP_ENDPOINT` no está definida al ejecutar el servicio fuera de Compose, las trazas no se exportan y se registra un aviso; la correlación de logs sigue funcionando.
 
 ### Cómo probarlo
 
@@ -196,7 +204,8 @@ En el entorno completo (`docker compose up -d --build`):
 | Repositorio MySQL con outbox | Implementado, con tests de integración contra MySQL real (testcontainers; `go test -short` los saltea) |
 | API pública v1 (`POST` y `GET`), API Key y rate limit | Implementados según el contrato 1.0.2, con tests de cada respuesta (201, 200, 400, 401, 404, 409, 422, 429, 503) |
 | Consumidor de `CompraConfirmada`, worker de envíos, publicador de outbox, PDF y SMTP | Pendiente: buscar `TODO(rabbit)` |
-| Trazas con OpenTelemetry | Pendiente: `TODO(observabilidad)` en `pkg/observabilidad` |
+| Middleware HTTP y spans de consultas MySQL | Implementados con OpenTelemetry; Jaeger local recibe OTLP/HTTP |
+| Propagación W3C y span consumidor RabbitMQ | Implementados en `pkg/observabilidad`; la instrumentación del publicador queda pendiente de integrar con el trabajo RabbitMQ |
 
 ## Cómo correrlo
 

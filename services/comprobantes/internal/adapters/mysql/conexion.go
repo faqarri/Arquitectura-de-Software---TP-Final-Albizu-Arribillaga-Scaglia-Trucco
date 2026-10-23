@@ -8,6 +8,7 @@ import (
 	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"gorm.io/plugin/opentelemetry/tracing"
 )
 
 // Config son los datos de conexión al esquema propio del servicio. El usuario es
@@ -36,6 +37,9 @@ func Conectar(cfg Config) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("conectar a MySQL: %w", err)
+	}
+	if err := db.Use(tracing.NewPlugin()); err != nil {
+		return nil, fmt.Errorf("instrumentar trazas de GORM: %w", err)
 	}
 	sqlDB, err := db.DB()
 	if err != nil {

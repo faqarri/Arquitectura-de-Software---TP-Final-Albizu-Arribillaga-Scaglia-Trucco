@@ -43,6 +43,7 @@ Componentes disponibles en esta etapa:
 | Mock del contrato de Comprobantes (Prism) | http://localhost:4010 |
 | RabbitMQ (management) | http://localhost:15672 |
 | Mailpit (bandeja de correo local) | http://localhost:8025 |
+| Jaeger (trazas distribuidas) | http://localhost:16686 |
 | OpenSearch | http://localhost:9200 |
 
 > Estado: Entrega 2 en curso. Comprobantes tiene su esqueleto (ver [su README](services/comprobantes/README.md)); los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
