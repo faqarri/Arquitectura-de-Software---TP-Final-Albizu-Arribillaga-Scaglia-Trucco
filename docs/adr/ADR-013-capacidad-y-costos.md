@@ -8,7 +8,7 @@
 
 El enunciado pide pruebas de carga con resultados documentados y analizados, el principal límite identificado, una alternativa de escalado y una estimación de costos.
 
-Estado al 2026-10-23: el único servicio con código es **Comprobantes**, y su `POST /v1/comprobantes` todavía responde `501 No implementado` (repositorio MySQL y API pendientes, `TODO(api-mysql)`; worker de envíos y outbox pendientes, `TODO(rabbit)`). Por eso **todavía no hay resultados**: este ADR fija qué se va a medir, cómo, qué se espera y cuánto costaría el despliegue. **Todos los números de este documento son objetivos o estimaciones, no mediciones.**
+Estado al 2026-10-23: el único servicio con código es **Comprobantes**. Su API, el repositorio MySQL con outbox y el worker de envíos ya están implementados, así que el escenario A se puede ejecutar; Catálogo y Reservas todavía no existen. Las pruebas **todavía no se ejecutaron**: este ADR fija qué se va a medir, cómo, qué se espera y cuánto costaría el despliegue. **Todos los números de este documento son objetivos o estimaciones, no mediciones.**
 
 ## Decisión
 
@@ -16,11 +16,11 @@ Estado al 2026-10-23: el único servicio con código es **Comprobantes**, y su `
 
 - **k6**, con los scripts versionados en `tests/carga/` (a crear junto con la implementación).
 - Se ejecuta contra el entorno de `docker compose` en una sola máquina. Se registran las características de esa máquina (CPU, memoria, disco) junto con cada resultado, porque los números absolutos dependen de ella.
-- Mientras corre la prueba se observa el tablero de D11 (latencia, errores, uso del pool de MySQL, largo de las colas, CPU y memoria de cada contenedor).
+- Mientras corre la prueba se observa el tablero de D11 (latencia, errores, uso del pool de MySQL, largo de las colas, CPU y memoria de cada contenedor). Mientras Prometheus y Grafana no estén desplegados ([ADR-011](ADR-011-observabilidad.md)), se usan los resultados de k6, la consola de RabbitMQ, `docker stats` y las trazas de Jaeger.
 
 ### Escenario A: emisión de comprobantes (`POST /v1/comprobantes`)
 
-Es la capacidad publicada y lo primero que estará implementado.
+Es la capacidad publicada y la única parte del sistema implementada hoy.
 
 **Requisito previo:** la API limita a 60 solicitudes por minuto por API Key. Con una sola clave, la prueba mediría el limitador y no el servicio. Se usan **50 API Keys de prueba** (`COMPROBANTES_API_KEYS` del entorno de prueba), repartidas entre los usuarios virtuales, y una corrida aparte con una sola clave para verificar que el `429` funciona.
 
@@ -45,7 +45,7 @@ export const options = {
     nominal: { executor: 'constant-arrival-rate', rate: 20, timeUnit: '1s',
                duration: '5m', preAllocatedVUs: 50 },
   },
-  thresholds: { http_req_failed: ['rate<0.001'], http_req_duration: ['p(95)<300'] },
+  thresholds: { http_req_failed: ['rate<0.001'], http_req_duration: ['p(95)<300', 'p(99)<500'] },
 };
 
 export default function () {
@@ -73,7 +73,7 @@ export default function () {
 | Correos por segundo enviados | Métricas del worker y Mailpit |
 | CPU y memoria de cada contenedor | `docker stats` o cAdvisor |
 
-**Objetivos (no medidos):** con 20 solicitudes por segundo, p95 ≤ 300 ms y menos de 0,1 % de errores; el 95 % de los correos sale en 60 s o menos, sin acumulación sostenida en la cola.
+**Objetivos (no medidos):** con 20 solicitudes por segundo, p95 ≤ 300 ms, p99 < 500 ms (el objetivo de servicio de [ADR-011](ADR-011-observabilidad.md)) y menos de 0,1 % de errores; el 95 % de los correos llega a `ENVIADO` en 60 s o menos (también de ADR-011), sin acumulación sostenida en la cola.
 
 ### Escenario B: flujo de compra (plan, cuando estén Catálogo y Reservas)
 
@@ -142,7 +142,7 @@ _Pendiente._ Se completa con la máquina usada, los resultados de cada corrida (
 
 ## Consecuencias
 
-- (+) El plan está listo para ejecutarse en cuanto Comprobantes esté implementado, con objetivos explícitos para comparar.
+- (+) El escenario A se puede ejecutar ya sobre Comprobantes, con objetivos explícitos para comparar.
 - (+) Las hipótesis indican qué mirar primero y qué escalar.
 - (+) El despliegue cuesta alrededor de USD 6 por mes.
 - (−) Hasta que se ejecuten las pruebas, ninguna afirmación de capacidad está verificada.

@@ -265,7 +265,7 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 
 - D4 Consistencia y concurrencia: formalizar lo descrito en ADR-014 (regla de bloqueo, idempotencia, recuperación), en Comprobantes (idempotencia por consumidor, outbox del envío) y en ADR-006 (outbox dentro del documento de la oferta).
 - D9 Consumo del proveedor: la estrategia está en [ADR-009](adr/ADR-009-consumo-del-proveedor.md); falta completar flujo, servicio consumidor y experiencia ante fallas cuando la cátedra asigne el proveedor.
-- D11 Observabilidad y D12 Balanceo de carga: en elaboración (ADR-011 y ADR-012).
+- D11 Observabilidad y D12 Balanceo de carga: propuestas en [ADR-011](adr/ADR-011-observabilidad.md) y [ADR-012](adr/ADR-012-balanceo-de-carga.md). Faltan desplegar Prometheus y Grafana con sus alertas, e implementar el gateway en Go con las réplicas de Catálogo.
 - D13 Capacidad: el plan, las hipótesis y los costos están en [ADR-013](adr/ADR-013-capacidad-y-costos.md); faltan ejecutar las pruebas y registrar los resultados, incluida la medición de caché de ADR-007.
 - Validación de D1, D3 y D5 contra el código (ADR-014, ADR-003, ADR-005): se hace cuando el código de los servicios esté integrado en `main`.
 - Tecnología del API Gateway (debe soportar SSE: sin buffering y con timeouts largos por ruta).

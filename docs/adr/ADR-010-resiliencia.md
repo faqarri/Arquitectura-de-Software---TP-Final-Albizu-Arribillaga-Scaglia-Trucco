@@ -83,14 +83,14 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 | Momento | Qué se espera ver |
 |---|---|
 | Emisión | `POST` responde `201` con `estadoEnvio: PENDIENTE`, en el mismo tiempo que con el correo funcionando. **La emisión no depende del correo** |
-| Reintentos | El worker registra 3 reintentos fallidos por comprobante, con espera creciente (propuesta: 10 s, 30 s y 90 s), cada uno en un log `WARN` con el `X-Correlation-Id` de la emisión |
+| Reintentos | El worker registra 3 reintentos fallidos por comprobante, con espera creciente (5 s, 15 s y 30 s, como está implementado; ver [ADR-005](ADR-005-comunicacion-entre-servicios.md#revisiones)), cada uno en un log `WARN` con el `X-Correlation-Id` de la emisión |
 | Agotados los reintentos | El comprobante pasa a `FALLIDO` y el mensaje aparece en `comprobantes.envios.dlq` |
 | Mientras tanto | Las compras propias se siguen confirmando: Reservas no depende de Comprobantes |
 | Al volver Mailpit | Los comprobantes nuevos llegan a `ENVIADO` |
 
-**Límite conocido, que también se va a mostrar:** `FALLIDO` es un estado final (dominio de Comprobantes y contrato 1.0.1). Reprocesar el mensaje de la DLQ **no reenvía** el correo, porque el caso de uso solo envía comprobantes `PENDIENTE`. Se registra como acción de mejora: una operación administrativa de "reintentar envío" que pase `FALLIDO → PENDIENTE` y vuelva a encolar.
+**Límite conocido, que también se va a mostrar:** `FALLIDO` es un estado final (dominio de Comprobantes y contrato 1.0.2). Reprocesar el mensaje de la DLQ **no reenvía** el correo, porque el caso de uso solo envía comprobantes `PENDIENTE`. Se registra como acción de mejora: una operación administrativa de "reintentar envío" que pase `FALLIDO → PENDIENTE` y vuelva a encolar.
 
-**Requisitos para poder demostrarlo:** que estén implementados el repositorio MySQL y la API (`TODO(api-mysql)`) y el worker de envíos con reintentos, DLQ y publicador de outbox (`TODO(rabbit)`).
+**Requisitos para poder demostrarlo:** ya están implementados en Comprobantes la API, el repositorio MySQL con outbox, el publicador de outbox y el worker de envíos con colas de reintento y DLQ (Entrega 2). Con las esperas implementadas, un comprobante llega a `FALLIDO` unos 50 s después de emitirse.
 
 **Caída secundaria (si llega el tiempo):** Catálogo caído durante una compra. Se espera ver el circuit breaker abriéndose, la compra en `PENDIENTE` y su resolución automática cuando Catálogo vuelve. Requiere Reservas y Catálogo implementados.
 
