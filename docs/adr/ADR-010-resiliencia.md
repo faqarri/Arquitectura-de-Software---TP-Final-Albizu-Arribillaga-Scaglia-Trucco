@@ -1,6 +1,6 @@
 # ADR-010: Resiliencia
 
-- **Estado:** Aceptada
+- **Estado:** Aceptada (revisada el 2026-10-23, ver [Revisiones](#revisiones))
 - **Fecha:** 2026-10-23
 - **Decisión de la cátedra:** D10
 
@@ -90,7 +90,7 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 
 **Límite conocido, que también se va a mostrar:** `FALLIDO` es un estado final (dominio de Comprobantes y contrato 1.0.2). Reprocesar el mensaje de la DLQ **no reenvía** el correo, porque el caso de uso solo envía comprobantes `PENDIENTE`. Se registra como acción de mejora: una operación administrativa de "reintentar envío" que pase `FALLIDO → PENDIENTE` y vuelva a encolar.
 
-**Requisitos para poder demostrarlo:** ya están implementados en Comprobantes la API, el repositorio MySQL con outbox, el publicador de outbox y el worker de envíos con colas de reintento y DLQ (Entrega 2). Con las esperas implementadas, un comprobante llega a `FALLIDO` unos 50 s después de emitirse.
+**Requisitos para poder demostrarlo:** ya están implementados en Comprobantes la API, el repositorio MySQL con outbox, el publicador de outbox y el worker de envíos con colas de reintento y DLQ (Entrega 2). En el ensayo del 2026-10-23, un comprobante llegó a `FALLIDO` unos 70 s después de emitirse: las esperas (5 + 15 + 30 s) más el tiempo de cada intento fallido (ver [Revisiones](#revisiones)).
 
 **Caída secundaria (si llega el tiempo):** Catálogo caído durante una compra. Se espera ver el circuit breaker abriéndose, la compra en `PENDIENTE` y su resolución automática cuando Catálogo vuelve. Requiere Reservas y Catálogo implementados.
 
@@ -124,3 +124,9 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 - (−) Los valores (timeouts, umbrales, esperas) son iniciales; se ajustan con las pruebas de carga ([ADR-013](ADR-013-capacidad-y-costos.md)).
 - (−) Un envío `FALLIDO` no tiene, por ahora, forma de reintentarse.
 - (−) La demostración depende de que se completen las partes pendientes de Comprobantes.
+
+## Revisiones
+
+| Fecha | Cambio | Motivo |
+|---|---|---|
+| 2026-10-23 | **Ensayo de la caída del correo** (`docker compose stop mailpit`), con resultado igual al esperado: 3 `POST` respondieron `201 PENDIENTE` en 17 a 25 ms; cada envío falló en el intento 1 y en los reintentos de 5, 15 y 30 s (log `WARN` por intento, con `trace_id` y `correlacion_id`); a los ~70 s de la emisión los tres quedaron `FALLIDO` y `comprobantes.envios.dlq` pasó de 0 a 3 mensajes. Al levantar Mailpit, un comprobante nuevo llegó a `ENVIADO` en menos de 3 s y los tres de la caída siguieron `FALLIDO`. Se corrige el tiempo esperado hasta `FALLIDO` (de "unos 50 s" a "unos 70 s"). **Hallazgo:** con el volumen de MySQL vacío, el primer `docker compose up` dejó a Comprobantes detenido (`connection refused`). El healthcheck de MySQL da por sano al servidor temporal de inicialización, que todavía no acepta conexiones TCP, y Comprobantes no reintenta la conexión al iniciar ni tiene `restart`. Se agrega como acción: healthcheck por TCP, `restart: on-failure` y reintentos de conexión al arrancar. | Ensayo previo a la jornada de fallas controladas. Sirve de base para `docs/POSTMORTEM.md`. El hallazgo afecta el requisito de puesta en marcha con un procedimiento único. |

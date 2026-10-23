@@ -1,6 +1,6 @@
 # ADR-013: Capacidad y costos
 
-- **Estado:** Propuesta (primera versión: plan de pruebas, hipótesis y estimación de costos; los resultados se agregan al ejecutar las pruebas)
+- **Estado:** Aceptada (primera versión: escenario A ejecutado el 2026-10-23; el escenario B se ejecuta cuando existan Catálogo y Reservas; ver [Revisiones](#revisiones))
 - **Fecha:** 2026-10-23
 - **Decisión de la cátedra:** D13
 
@@ -8,7 +8,7 @@
 
 El enunciado pide pruebas de carga con resultados documentados y analizados, el principal límite identificado, una alternativa de escalado y una estimación de costos.
 
-Estado al 2026-10-23: el único servicio con código es **Comprobantes**. Su API, el repositorio MySQL con outbox y el worker de envíos ya están implementados, así que el escenario A se puede ejecutar; Catálogo y Reservas todavía no existen. Las pruebas **todavía no se ejecutaron**: este ADR fija qué se va a medir, cómo, qué se espera y cuánto costaría el despliegue. **Todos los números de este documento son objetivos o estimaciones, no mediciones.**
+Estado al 2026-10-23: el único servicio con código es **Comprobantes** (API, repositorio MySQL con outbox y worker de envíos). El **escenario A se ejecutó** y sus resultados están en [Resultados](#resultados). Catálogo y Reservas todavía no existen, así que el escenario B sigue siendo un plan. Los números de las secciones de objetivos, hipótesis y costos son objetivos o estimaciones; los de Resultados son mediciones.
 
 ## Decisión
 
@@ -22,7 +22,7 @@ Estado al 2026-10-23: el único servicio con código es **Comprobantes**. Su API
 
 Es la capacidad publicada y la única parte del sistema implementada hoy.
 
-**Requisito previo:** la API limita a 60 solicitudes por minuto por API Key. Con una sola clave, la prueba mediría el limitador y no el servicio. Se usan **50 API Keys de prueba** (`COMPROBANTES_API_KEYS` del entorno de prueba), repartidas entre los usuarios virtuales, y una corrida aparte con una sola clave para verificar que el `429` funciona.
+**Requisito previo:** la API limita a 60 solicitudes por minuto por API Key (1 por segundo). Con pocas claves, la prueba mediría el limitador y no el servicio: para una tasa de N solicitudes por segundo hacen falta más de N claves. Se usan **400 API Keys de prueba** (`COMPROBANTES_API_KEYS` del entorno de prueba), repartidas **por solicitud** y no por usuario virtual, más una corrida aparte con una sola clave para verificar el `429`. En A4, cada reintento usa la misma API Key que la solicitud original, porque la idempotencia es por consumidor.
 
 | Corrida | Carga | Para qué |
 |---|---|---|
@@ -87,7 +87,7 @@ export default function () {
 
 Se ordenan por probabilidad. La prueba confirma o descarta cada una.
 
-1. **Envío de correos (Comprobantes).** El worker genera un PDF y hace una conexión SMTP por correo. Si se emite más rápido de lo que se envía, la cola `comprobantes.envios` crece sin parar. No afecta la latencia del `POST` (que solo inserta), pero sí el tiempo hasta `ENVIADO`. Señal: cola creciente con CPU del worker alta o esperas de SMTP.
+1. **Envío de correos (Comprobantes).** El worker genera un PDF y hace una conexión SMTP por correo. Si se emite más rápido de lo que se envía, la cola `comprobantes.envios` crece sin parar. No afecta la latencia del `POST` (que solo inserta), pero sí el tiempo hasta `ENVIADO`. Señal: cola creciente con CPU del worker alta o esperas de SMTP. **Resultado: casi.** El límite estuvo en el camino asíncrono, pero un paso antes: el **publicador del outbox** (ver [Resultados](#resultados)). La cola de envíos nunca pasó de 2 mensajes.
 2. **Pool de conexiones de MySQL de Comprobantes (20).** Cada `POST` usa una transacción (comprobante, ítems y outbox) y cada commit escribe a disco. Señal: conexiones en espera mayores que cero y latencia creciente con la CPU de MySQL disponible.
 3. **Contención en la fila de inventario de una oferta caliente (Catálogo).** La regla de bloqueo de ADR-014 serializa todas las operaciones de una misma oferta: la capacidad para esa oferta es aproximadamente 1 / duración de la transacción, sin importar cuántas instancias haya. Señal: en B2, la latencia de retener crece de forma lineal con la cantidad de usuarios concurrentes. Es un límite **deliberado**, porque garantiza RN-01.
 
@@ -95,6 +95,7 @@ Se ordenan por probabilidad. La prueba confirma o descarta cada una.
 
 | Límite | Alternativa | Costo |
 |---|---|---|
+| **Publicador del outbox (límite medido: ≈ 45 eventos/s)** | Hoy publica un lote de 50 eventos por segundo (`tamanioLoteOutbox = 50`, `IntervaloOutbox = 1 s`), cada uno con su confirmación y su `UPDATE`. Alternativas, de menor a mayor esfuerzo: (1) volver a leer enseguida mientras el lote venga lleno, en lugar de esperar al próximo segundo; (2) lotes más grandes, con confirmaciones del broker en bloque y un solo `UPDATE ... WHERE id IN (...)`; (3) varios publicadores, cada uno con `SELECT ... FOR UPDATE SKIP LOCKED` sobre el outbox | Bajo. La opción 1 es un cambio de pocas líneas |
 | Envío de correos | Varios consumidores del worker (`prefetch` mayor o más instancias); conexión SMTP reutilizada | Bajo. El estado ya está en la base |
 | Pool de MySQL de Comprobantes | Más instancias del servicio (no tiene estado propio) y luego más recursos para MySQL (escalado vertical) | Con varias instancias, el límite de 60 solicitudes por minuto debe contarse en Redis y no en memoria |
 | Oferta caliente | **Partir el cupo** de la oferta en N filas de inventario (por ejemplo, 4 filas de 25 cupos) y retener en cualquiera con lugar | Alto: complica el cálculo de disponibilidad y la regla de bloqueo. Solo si B2 muestra que hace falta |
@@ -131,7 +132,35 @@ Precios tomados de fuentes públicas el 2026-10-23. Las fuentes no coinciden ent
 
 ### Resultados
 
-_Pendiente._ Se completa con la máquina usada, los resultados de cada corrida (tablas y gráficos del tablero), el límite que efectivamente apareció primero y el análisis respecto de las hipótesis. También se incluyen aquí las mediciones de caché antes y después de [ADR-007](ADR-007-cache.md).
+**Entorno:** Docker Desktop en Windows 11, con 16 CPU y 7,4 GiB de RAM asignados a Docker. Todos los contenedores (Comprobantes, MySQL 8.4, RabbitMQ 3.13, Mailpit, Jaeger) y k6 0.54.0 en la misma máquina, en la red de `docker compose`. Fecha: 2026-10-23. Script: [`tests/carga/comprobantes.js`](../../tests/carga/comprobantes.js).
+
+| Corrida | Solicitudes | Tasa | Errores | p50 | p95 | p99 | Máx. | Resultado |
+|---|---|---|---|---|---|---|---|---|
+| A1. Humo | 61 | 1/s | 0 % | 16 ms | 22 ms | 25 ms | 25 ms | 61/61 `201` |
+| A2. Nominal | 6001 | 20/s | 0 % | 15 ms | 21 ms | 26 ms | 63 ms | **Cumple los objetivos** (p95 ≤ 300 ms, p99 < 500 ms, < 0,1 % de errores) |
+| A3. Creciente | 92 999 | 10 → 300/s (media 155/s) | 0 % | 19 ms | 33 ms | 49 ms | 555 ms | La API **no llegó a su límite** a 300/s |
+| A4. Idempotencia | 2401 | 20/s | 0 % | 15 ms | 20 ms | 23 ms | 30 ms | 2175 `201` nuevos y 226 reintentos `200` con el mismo comprobante |
+| A5. Límite | Ráfaga de 80 con 1 API Key | — | — | — | — | — | — | 73 `201` y luego `429` `application/problem+json` con `Retry-After: 1` (*token bucket*: ráfaga de 60 más la recarga de 1 por segundo) |
+
+**Camino asíncrono** (muestras cada ~20 s durante A2 y A3; 100 % de CPU = un núcleo):
+
+| Momento | Emisiones/s (k6) | Correos `ENVIADO`/s | Outbox sin publicar | Cola `comprobantes.envios` | CPU Comprobantes / MySQL |
+|---|---|---|---|---|---|
+| A2 (todo el tramo) | 20 | 20 | 7 a 19, estable | 1 a 2 | ~55 % / ~30 % |
+| A3, minuto 1 | ~40 | ~32 | 38 | 2 | 129 % / 70 % |
+| A3, minuto 3 | ~100 | ~48 | 1 902 | 2 | 158 % / 86 % |
+| A3, minuto 6 | ~190 | ~46 | 16 852 | 2 | 233 % / 138 % |
+| A3, minuto 10 | ~300 | ~44 | **62 830** | 2 | 288 % / 171 % |
+
+**Análisis:**
+
+- **El principal límite es el publicador del outbox, con ≈ 45 eventos por segundo.** A partir de unas 50 emisiones por segundo el outbox crece de forma lineal, mientras la cola de envíos sigue casi vacía: el worker y el SMTP (Mailpit) procesan todo lo que les llega. El techo coincide con el diseño del publicador (un lote de 50 eventos por segundo, publicados y marcados de a uno). Es un límite de **configuración**, no de infraestructura (ver Alternativas de escalado).
+- **Consecuencia para el negocio:** ningún comprobante se pierde (el outbox está en la base) y la API sigue respondiendo en milisegundos, pero durante un pico el tiempo hasta `ENVIADO` crece sin límite. Al final de A3, con 62 830 eventos pendientes, vaciar el outbox lleva unos 23 minutos. El objetivo de ADR-011 (95 % de los correos `ENVIADO` en 60 s) se cumple hasta unas 45 emisiones por segundo sostenidas.
+- **La API soporta al menos 300 solicitudes por segundo** en esta máquina, con p99 < 50 ms y sin errores; no se encontró su límite. Comprobantes llegó a ~2,9 núcleos y MySQL a ~1,7, así que el siguiente límite probable es la CPU. Hipótesis 2 (pool de MySQL): **no apareció** a esta carga.
+- **Contexto:** la carga esperada de la capacidad publicada (un grupo consumidor, decenas de solicitudes por día, con un máximo de 60 por minuto por API Key) está más de 1000 veces por debajo de lo probado. El límite del outbox importa para picos de compras propias, no para el uso externo previsto.
+- **Limitaciones de la medición:** k6 y el sistema compartieron la máquina; Mailpit acepta correos mucho más rápido que un SMTP real, así que en producción el envío podría pasar a ser el límite; y los datos de CPU son de `docker stats`, porque Prometheus todavía no está desplegado.
+
+Pendiente: escenario B (flujo de compra y oferta caliente) cuando existan Catálogo y Reservas, y la medición de caché antes y después de [ADR-007](ADR-007-cache.md).
 
 ## Alternativas consideradas
 
@@ -142,9 +171,16 @@ _Pendiente._ Se completa con la máquina usada, los resultados de cada corrida (
 
 ## Consecuencias
 
-- (+) El escenario A se puede ejecutar ya sobre Comprobantes, con objetivos explícitos para comparar.
+- (+) El escenario A está medido: la API cumple los objetivos con amplio margen y se identificó el principal límite (publicador del outbox, ≈ 45 eventos/s), que tiene una solución de bajo costo.
 - (+) Las hipótesis indican qué mirar primero y qué escalar.
 - (+) El despliegue cuesta alrededor de USD 6 por mes.
-- (−) Hasta que se ejecuten las pruebas, ninguna afirmación de capacidad está verificada.
+- (−) El flujo de compra (escenario B) y la caché todavía no están medidos.
+- (−) Mientras no se ajuste el publicador del outbox, un pico de más de ~45 emisiones por segundo atrasa los correos (sin perderlos).
 - (−) La VM es un único punto de falla, y las copias de seguridad y las actualizaciones las operamos nosotros.
 - (−) La prueba de carga exige configurar varias API Keys de prueba, o un límite de solicitudes configurable.
+
+## Revisiones
+
+| Fecha | Cambio | Motivo |
+|---|---|---|
+| 2026-10-23 | Se ejecuta el escenario A (A1 a A5) y se registran los resultados. El requisito previo pasa de 50 a **400 API Keys repartidas por solicitud** y, en A4, el reintento usa la misma API Key que la solicitud original. Se agrega a las alternativas de escalado el publicador del outbox, que resultó ser el principal límite. Pasa de Propuesta a Aceptada como primera versión. | Al preparar A3 se vio que 50 claves de 60 por minuto solo permiten 50 solicitudes por segundo: la rampa hasta 300 habría medido el limitador. Además, como la idempotencia es por consumidor, un reintento con otra API Key es una emisión nueva y no prueba la idempotencia. |
