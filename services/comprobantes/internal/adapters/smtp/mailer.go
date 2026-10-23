@@ -1,9 +1,11 @@
-// Package smtp implementa ports.Mailer. En local apunta a Mailpit.
+// Package smtp implementa ports.Mailer. En local apunta a Mailpit; con
+// credenciales, a un SMTP real (por ejemplo Gmail) con STARTTLS.
 package smtp
 
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -28,11 +30,14 @@ const TiempoMaximoEnvio = 10 * time.Second
 
 const nombreRemitente = "Agencia de Viajes"
 
-// Config del servidor de correo. Sin autenticación ni TLS: en local es Mailpit.
+// Config del servidor de correo. Sin Usuario no hay autenticación ni TLS (Mailpit
+// en local). Con Usuario se exige STARTTLS y se autentica con PLAIN.
 type Config struct {
 	Host      string
 	Puerto    string
 	Remitente string
+	Usuario   string
+	Password  string
 }
 
 type Mailer struct {
@@ -85,6 +90,18 @@ func (m *Mailer) entregar(ctx context.Context, para string, mensaje []byte) erro
 		return fmt.Errorf("saludo SMTP: %w", err)
 	}
 	defer cliente.Close()
+	if m.cfg.Usuario != "" {
+		// Con credenciales se exige TLS: la contraseña nunca viaja en claro.
+		if ok, _ := cliente.Extension("STARTTLS"); !ok {
+			return errors.New("el servidor no ofrece STARTTLS")
+		}
+		if err := cliente.StartTLS(&tls.Config{ServerName: m.cfg.Host}); err != nil {
+			return fmt.Errorf("STARTTLS: %w", err)
+		}
+		if err := cliente.Auth(smtp.PlainAuth("", m.cfg.Usuario, m.cfg.Password, m.cfg.Host)); err != nil {
+			return fmt.Errorf("autenticación SMTP: %w", err)
+		}
+	}
 	if err := cliente.Mail(m.cfg.Remitente); err != nil {
 		return fmt.Errorf("MAIL FROM: %w", err)
 	}

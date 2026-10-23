@@ -44,6 +44,8 @@ func cargarConfig() (config, error) {
 			Host:      conDefecto("SMTP_HOST", "localhost"),
 			Puerto:    conDefecto("SMTP_PUERTO", "1025"),
 			Remitente: conDefecto("SMTP_REMITENTE", "comprobantes@agencia-viajes.example"),
+			Usuario:   os.Getenv("SMTP_USUARIO"),
+			Password:  os.Getenv("SMTP_PASSWORD"),
 		},
 	}
 	claves := requerida("COMPROBANTES_API_KEYS")

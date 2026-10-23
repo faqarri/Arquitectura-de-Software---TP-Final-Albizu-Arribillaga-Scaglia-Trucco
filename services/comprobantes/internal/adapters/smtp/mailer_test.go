@@ -167,6 +167,21 @@ func TestEnviarFallaSiNoHayServidor(t *testing.T) {
 	}
 }
 
+func TestEnviarConCredencialesExigeSTARTTLS(t *testing.T) {
+	cfg, recibido := servidorSMTP(t) // no ofrece STARTTLS
+	cfg.Usuario, cfg.Password = "agencia@example.com", "secreta"
+
+	err := NuevoMailer(cfg).Enviar(context.Background(), ports.Correo{Para: "c@d.example", Asunto: "x", Cuerpo: "x"})
+	if err == nil || !strings.Contains(err.Error(), "STARTTLS") {
+		t.Fatalf("err = %v; se esperaba error por falta de STARTTLS", err)
+	}
+	select {
+	case <-recibido:
+		t.Error("el mensaje no debía enviarse sin TLS")
+	default:
+	}
+}
+
 func TestArmarMensajeRechazaSaltosDeLineaEnEncabezados(t *testing.T) {
 	_, err := armarMensaje("a@b.example", ports.Correo{Para: "c@d.example\r\nBcc: e@f.example", Asunto: "x"}, time.Now())
 	if err == nil {

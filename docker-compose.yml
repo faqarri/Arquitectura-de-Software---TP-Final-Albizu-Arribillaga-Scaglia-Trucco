@@ -73,8 +73,12 @@ services:
       DB_PASSWORD: ${COMPROBANTES_DB_PASSWORD}
       DB_NOMBRE: comprobantes
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
-      SMTP_HOST: mailpit
-      SMTP_PUERTO: "1025"
+      # Sin SMTP_* en .env se usa Mailpit; con credenciales, un SMTP real (README de comprobantes).
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PUERTO: ${SMTP_PUERTO:-1025}
+      SMTP_USUARIO: ${SMTP_USUARIO:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_REMITENTE: ${SMTP_REMITENTE:-}
       COMPROBANTES_API_KEYS: ${COMPROBANTES_API_KEYS}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports: ["8081:8080"]

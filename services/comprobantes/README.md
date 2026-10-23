@@ -10,7 +10,7 @@
 |---|---|---|
 | MySQL | Almacenamiento | Comprobantes con clave única de idempotencia por consumidor, y outbox |
 | RabbitMQ | Mensajería | Consume `CompraConfirmada` (con DLQ). Cola interna `comprobantes.envios` (con DLQ) para enviar los correos con reintentos |
-| SMTP (Mailpit en local) | Externa | Envío de correos con PDF adjunto |
+| SMTP (Mailpit en local, o un SMTP real con `SMTP_USUARIO`) | Externa | Envío de correos con PDF adjunto |
 
 **Entradas:**
 
@@ -203,7 +203,7 @@ En el entorno completo (`docker compose up -d --build`):
 | Conexión a MySQL, esquema (GORM `AutoMigrate`) y `GET /health` | Implementados |
 | Repositorio MySQL con outbox | Implementado, con tests de integración contra MySQL real (testcontainers; `go test -short` los saltea) |
 | API pública v1 (`POST` y `GET`), API Key y rate limit | Implementados según el contrato 1.0.2, con tests de cada respuesta (201, 200, 400, 401, 404, 409, 422, 429, 503) |
-| Consumidor de `CompraConfirmada`, worker de envíos, publicador de outbox, PDF y SMTP | Pendiente: buscar `TODO(rabbit)` |
+| Consumidor de `CompraConfirmada`, worker de envíos, publicador de outbox, PDF y SMTP | Implementados, con tests unitarios y de integración contra RabbitMQ real (testcontainers). SMTP con STARTTLS y autenticación para casillas reales |
 | Middleware HTTP y spans de consultas MySQL | Implementados con OpenTelemetry; Jaeger local recibe OTLP/HTTP |
 | Propagación W3C y span consumidor RabbitMQ | Implementados en `pkg/observabilidad`; la instrumentación del publicador queda pendiente de integrar con el trabajo RabbitMQ |
 
@@ -215,6 +215,19 @@ curl http://localhost:8081/health
 
 go test ./...                                # desde services/comprobantes: tests unitarios y de arquitectura
 ```
+
+### Correo real en lugar de Mailpit
+
+Por defecto los correos quedan en Mailpit y no salen a internet. Para que lleguen a casillas reales, completar en `.env` (ejemplo con Gmail) y recrear el servicio con `docker compose up -d comprobantes`:
+
+| Variable | Valor |
+|---|---|
+| `SMTP_HOST` / `SMTP_PUERTO` | `smtp.gmail.com` / `587` |
+| `SMTP_USUARIO` | La cuenta de Gmail |
+| `SMTP_PASSWORD` | Una **contraseña de aplicación** de esa cuenta (requiere verificación en 2 pasos); nunca la contraseña normal |
+| `SMTP_REMITENTE` | La misma cuenta: Gmail reemplaza o rechaza otros remitentes |
+
+Con `SMTP_USUARIO` cargado, el mailer exige STARTTLS y se autentica; si el servidor no ofrece TLS, no envía la contraseña y el envío falla (se reintenta y termina en `FALLIDO`).
 
 **Historial:**
 - 2026-10-22: el contrato pasa a 1.0.0 (solo `email` e `items`, envío siempre por correo, sin descarga de PDF por API) ([ADR-008](../../docs/adr/ADR-008-contrato-propio.md)).
