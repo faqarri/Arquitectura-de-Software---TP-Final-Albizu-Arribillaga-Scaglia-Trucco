@@ -46,7 +46,7 @@ Componentes disponibles en esta etapa:
 | Jaeger (trazas distribuidas) | http://localhost:16686 |
 | OpenSearch | http://localhost:9200 |
 
-> Estado: Entrega 2 (23/10/2026). Están documentadas las decisiones D2, D6, D7, D9 (estrategia general, a completar cuando se asigne el proveedor), D10 y D13 (plan de pruebas y costos), además de D11 y D12 ([índice de ADRs](docs/adr/README.md)). Comprobantes tiene su esqueleto con dominio y casos de uso probados (ver [su README](services/comprobantes/README.md)); su API y sus colas están en implementación. Los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
+> Estado: Entrega 2 (23/10/2026). **Comprobantes**, la capacidad publicada, funciona de punta a punta: API v1 (contrato 1.0.2), MySQL con outbox, mensajería con reintentos y DLQ, envío del PDF por correo y trazas en Jaeger (ver [su README](services/comprobantes/README.md)). Están documentadas las decisiones D2, D6, D7, D9 (estrategia general, a completar cuando se asigne el proveedor), D10, D11, D12 y D13 (con la prueba de carga de Comprobantes ya ejecutada), y D1, D3 y D5 están validadas sobre Comprobantes ([índice de ADRs](docs/adr/README.md)). Los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
 
 ### Código y tests
 
