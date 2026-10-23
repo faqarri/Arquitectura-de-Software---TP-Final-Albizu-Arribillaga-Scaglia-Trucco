@@ -1,6 +1,6 @@
 # Servicio Comprobantes
 
-**Responsabilidad:** emisión de facturas en PDF y envío **siempre** por correo al email indicado. Implementa la **capacidad publicada** (contrato 1.0.1 en `docs/contracts/comprobantes/v1/`).
+**Responsabilidad:** emisión de facturas en PDF y envío **siempre** por correo al email indicado. Implementa la **capacidad publicada** (contrato 1.0.2 en `docs/contracts/comprobantes/v1/`).
 
 **Datos propios (MySQL, esquema `comprobantes`):** comprobantes (email, ítems, total), claves de idempotencia por consumidor, estado de envío (`PENDIENTE`, `ENVIADO`, `FALLIDO`) y outbox.
 
@@ -40,6 +40,8 @@ La clave de idempotencia es **por consumidor**: dos grupos pueden usar la misma 
 ## Reglas de la API pública
 
 - **Autenticación:** `X-API-Key`. Las claves válidas se configuran en `COMPROBANTES_API_KEYS` con el formato `grupo:clave,grupo:clave`. En la base se guarda el nombre del grupo (`consumidor`), nunca la clave.
+- **Timeout contra MySQL:** cada solicitud espera a la base como máximo 2 segundos ([ADR-010](../../docs/adr/ADR-010-resiliencia.md)). Si MySQL está caído o lento, responde `503` con `Retry-After` y el consumidor reintenta con la misma `Idempotency-Key`. Cuando la base vuelve, el servicio se recupera solo. `GET /health` responde `503` mientras la base no responda.
+- **Importe máximo:** ningún precio ni el total pueden superar `9999999999.99` (el máximo de `DECIMAL(12,2)`); si no, `422`.
 - **Límite de solicitudes:** 60 por minuto por API Key, controlado por el propio servicio, porque esta API **no pasa por el gateway** ([ADR-008](../../docs/adr/ADR-008-contrato-propio.md)). Al superarlo responde `429` con `Retry-After`.
 - **Importes:** se guardan como `DECIMAL(12,2)` (nunca como punto flotante), así las sumas no acumulan errores de redondeo. Un precio con más de 2 decimales **se redondea** a 2 (al más cercano; el 5 redondea hacia arriba: `10.005` → `10.01`). Primero se redondea cada ítem y después se suma el total, así el total siempre coincide con la suma de los ítems que se devuelven. El hash de idempotencia se calcula sobre el cuerpo **original**, antes de redondear. Si después de redondear el total queda en cero (por ejemplo, un único ítem de `0.004`), responde `422`.
 
@@ -85,7 +87,8 @@ El adaptador HTTP se llama `api` y no `http` para no chocar con el paquete `net/
 |---|---|
 | Dominio y casos de uso | Implementados, con tests unitarios |
 | Conexión a MySQL, esquema (GORM `AutoMigrate`) y `GET /health` | Implementados |
-| Repositorio MySQL, handlers de la API, API Key y rate limit | Pendiente: buscar `TODO(api-mysql)` |
+| Repositorio MySQL con outbox | Implementado, con tests de integración contra MySQL real (testcontainers; `go test -short` los saltea) |
+| API pública v1 (`POST` y `GET`), API Key y rate limit | Implementados según el contrato 1.0.2, con tests de cada respuesta (201, 200, 400, 401, 404, 409, 422, 429, 503) |
 | Consumidor de `CompraConfirmada`, worker de envíos, publicador de outbox, PDF y SMTP | Pendiente: buscar `TODO(rabbit)` |
 | Trazas con OpenTelemetry | Pendiente: `TODO(observabilidad)` en `pkg/observabilidad` |
 

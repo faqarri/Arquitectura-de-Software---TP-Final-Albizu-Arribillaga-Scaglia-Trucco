@@ -24,11 +24,16 @@ const (
 // (evento CompraConfirmada). Los grupos externos se identifican por su API Key.
 const ConsumidorInterno = "interno"
 
+// ImporteMaximo es el mayor precio o total que admite un comprobante: el máximo
+// de DECIMAL(12,2), la precisión con la que se guardan los importes.
+var ImporteMaximo = decimal.RequireFromString("9999999999.99")
+
 var (
-	ErrSinItems           = errors.New("el comprobante debe tener al menos un ítem")
-	ErrPrecioNegativo     = errors.New("el precio de un ítem no puede ser negativo")
-	ErrTotalCero          = errors.New("el total del comprobante debe ser mayor a cero")
-	ErrTransicionInvalida = errors.New("transición de estado de envío inválida")
+	ErrSinItems            = errors.New("el comprobante debe tener al menos un ítem")
+	ErrPrecioNegativo      = errors.New("el precio de un ítem no puede ser negativo")
+	ErrTotalCero           = errors.New("el total del comprobante debe ser mayor a cero")
+	ErrImporteFueraDeRango = errors.New("el precio de cada ítem y el total no pueden superar 9999999999.99")
+	ErrTransicionInvalida  = errors.New("transición de estado de envío inválida")
 )
 
 // Item es una línea del comprobante.
@@ -67,11 +72,17 @@ func NuevoComprobante(consumidor, clave, hash, email string, items []Item, ahora
 			return nil, ErrPrecioNegativo
 		}
 		precio := it.Precio.Round(2)
+		if precio.GreaterThan(ImporteMaximo) {
+			return nil, ErrImporteFueraDeRango
+		}
 		redondeados[i] = Item{Descripcion: it.Descripcion, Precio: precio}
 		total = total.Add(precio)
 	}
 	if !total.IsPositive() {
 		return nil, ErrTotalCero
+	}
+	if total.GreaterThan(ImporteMaximo) {
+		return nil, ErrImporteFueraDeRango
 	}
 	return &Comprobante{
 		ID:             uuid.NewString(),
@@ -82,7 +93,9 @@ func NuevoComprobante(consumidor, clave, hash, email string, items []Item, ahora
 		Items:          redondeados,
 		Total:          total,
 		EstadoEnvio:    EnvioPendiente,
-		FechaEmision:   ahora.UTC(),
+		// Milisegundos: es la precisión con la que se guarda, así la fecha que
+		// devuelve la emisión es la misma que se lee después.
+		FechaEmision: ahora.UTC().Truncate(time.Millisecond),
 	}, nil
 }
 

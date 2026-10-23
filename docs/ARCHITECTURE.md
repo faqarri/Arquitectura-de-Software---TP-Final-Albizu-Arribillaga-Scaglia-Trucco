@@ -113,7 +113,7 @@ flowchart TB
 | Catálogo → Catálogo (indexador) | Asíncrona | Evento `OfertaActualizada`, cola con DLQ | Mantener sincronizado el índice de búsqueda |
 | Catálogo → Tiempo Real | Asíncrona | `DisponibilidadCambiada` y `RetencionVencida` (outbox) en exchange fanout `catalogo.disponibilidad`, cola exclusiva por instancia, **sin DLQ** | Notificar a los navegadores |
 | Catálogo → Reservas | Asíncrona | `RetencionVencida` en el mismo fanout, cola durable `reservas.retenciones` con DLQ | Marcar el ítem del carrito como vencido |
-| Consumidor externo → Comprobantes | Síncrona | REST/JSON, contrato OpenAPI v1 (1.0.1) | Capacidad publicada |
+| Consumidor externo → Comprobantes | Síncrona | REST/JSON, contrato OpenAPI v1 (1.0.2) | Capacidad publicada |
 
 Detalle y justificación en [ADR-005](adr/ADR-005-comunicacion-entre-servicios.md).
 
