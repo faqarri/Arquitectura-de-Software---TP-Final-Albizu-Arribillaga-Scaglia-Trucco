@@ -55,6 +55,8 @@ func TestNuevoComprobanteErrores(t *testing.T) {
 		{"precio negativo", []Item{item("a", "10"), item("b", "-1")}, ErrPrecioNegativo},
 		{"total cero", []Item{item("a", "0"), item("b", "0")}, ErrTotalCero},
 		{"total cero después de redondear", []Item{item("a", "0.004")}, ErrTotalCero},
+		{"precio mayor al máximo", []Item{item("a", "10000000000")}, ErrImporteFueraDeRango},
+		{"total mayor al máximo", []Item{item("a", "9999999999.99"), item("b", "0.01")}, ErrImporteFueraDeRango},
 	}
 	for _, tc := range casos {
 		t.Run(tc.nombre, func(t *testing.T) {

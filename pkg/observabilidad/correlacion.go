@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 // HeaderCorrelacion viaja en las solicitudes HTTP y en los headers de los mensajes
@@ -33,6 +34,7 @@ const rutaSalud = "/health"
 // MiddlewareGin toma el X-Correlation-Id de la solicitud (o genera uno), lo
 // devuelve en la respuesta, lo deja en el contexto y registra un log por solicitud.
 func MiddlewareGin(log *slog.Logger) gin.HandlerFunc {
+	middlewareTrazas := otelgin.Middleware("agencia/pkg/observabilidad")
 	return func(c *gin.Context) {
 		id := c.GetHeader(HeaderCorrelacion)
 		if id == "" {
@@ -43,7 +45,8 @@ func MiddlewareGin(log *slog.Logger) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 
 		inicio := time.Now()
-		c.Next()
+		middlewareTrazas(c)
+		ctx = c.Request.Context()
 
 		if c.FullPath() == rutaSalud {
 			return

@@ -61,6 +61,10 @@ type Mailer interface {
 	Enviar(ctx context.Context, correo Correo) error
 }
 
+// EventoEnvioSolicitado es el tipo del evento que Guardar deja en el outbox para
+// que el worker envíe el correo. Payload: {"comprobanteId": "..."}.
+const EventoEnvioSolicitado = "EnvioSolicitado"
+
 // EventoOutbox es un evento guardado en el outbox, pendiente de publicar.
 // Headers trae la correlación y la traza de la solicitud que lo originó; el
 // publicador los copia en los headers del mensaje.

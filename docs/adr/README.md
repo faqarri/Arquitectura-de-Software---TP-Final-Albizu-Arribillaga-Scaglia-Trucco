@@ -9,11 +9,11 @@
 | [ADR-005](ADR-005-comunicacion-entre-servicios.md) | D5 Comunicación entre servicios | Propuesta (versión inicial, revisada 2026-10-22 y 2026-10-23; validación de Entrega 2 pendiente) |
 | [ADR-006](ADR-006-busqueda.md) | D6 Búsqueda | Aceptada |
 | [ADR-007](ADR-007-cache.md) | D7 Caché | Aceptada |
-| [ADR-008](ADR-008-contrato-propio.md) | D8 Contrato propio | Aceptada (revisada 2026-10-22: contrato 1.0.1; idempotencia por consumidor; redondeo) |
+| [ADR-008](ADR-008-contrato-propio.md) | D8 Contrato propio | Aceptada (revisada: contrato 1.0.2; idempotencia por consumidor; redondeo; importe máximo) |
 | [ADR-009](ADR-009-consumo-del-proveedor.md) | D9 Consumo del proveedor | Propuesta (estrategia general; se completa cuando se asigne el proveedor) |
 | [ADR-010](ADR-010-resiliencia.md) | D10 Resiliencia | Aceptada |
-| [ADR-011](ADR-011-observabilidad.md) | D11 Observabilidad | Primera versión (en elaboración) |
-| [ADR-012](ADR-012-balanceo-de-carga.md) | D12 Balanceo de carga | En elaboración |
+| [ADR-011](ADR-011-observabilidad.md) | D11 Observabilidad | Propuesta (versión inicial para la Entrega 2) |
+| [ADR-012](ADR-012-balanceo-de-carga.md) | D12 Balanceo de carga | Propuesta (versión inicial para la Entrega 2) |
 | [ADR-013](ADR-013-capacidad-y-costos.md) | D13 Capacidad y costos | Propuesta (plan, hipótesis y costos; resultados pendientes) |
 | [ADR-014](ADR-014-cupos-en-catalogo-con-retencion.md) | D1 Límites de los servicios — cupos en Catálogo con retención temporal | Aceptada (revisada 2026-10-22: regla de bloqueo; validación de Entrega 2 pendiente) |
 | [ADR-015](ADR-015-disponibilidad-en-tiempo-real.md) | Disponibilidad en tiempo real (agotado vs. retenido) — bonus | Aceptada |
