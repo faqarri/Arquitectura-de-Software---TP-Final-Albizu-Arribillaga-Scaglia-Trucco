@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -125,6 +126,25 @@ func pedir(t *testing.T, srv *httptest.Server, metodo, ruta, apiKey, clave, cuer
 	r := respuesta{estado: res.StatusCode, headers: res.Header, crudo: string(b)}
 	_ = json.Unmarshal(b, &r.cuerpo)
 	return r
+}
+
+func TestMetricsExponeMetricasPrometheusSinAutenticacion(t *testing.T) {
+	srv, _ := nuevoServidor(t)
+
+	if res := pedir(t, srv, http.MethodGet, "/health", "", "", ""); res.estado != http.StatusOK {
+		t.Fatalf("GET /health: estado = %d, se esperaba %d", res.estado, http.StatusOK)
+	}
+	res := pedir(t, srv, http.MethodGet, "/metrics", "", "", "")
+
+	if res.estado != http.StatusOK {
+		t.Fatalf("GET /metrics: estado = %d, se esperaba %d", res.estado, http.StatusOK)
+	}
+	if !strings.Contains(res.crudo, "http_requests_total") {
+		t.Fatal("la respuesta no contiene el contador HTTP")
+	}
+	if !strings.Contains(res.crudo, "http_request_duration_seconds") {
+		t.Fatal("la respuesta no contiene el histograma de duración HTTP")
+	}
 }
 
 const cuerpoValido = `{
@@ -338,4 +358,43 @@ func TestSaludSinAutenticacion(t *testing.T) {
 	if r.cuerpo["estado"] != "ok" {
 		t.Errorf("cuerpo inesperado: %s", r.crudo)
 	}
+}
+
+func TestEndpointErrorPruebaRegistraErrorYMetrica500(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var salida bytes.Buffer
+	srv := httptest.NewServer(api.NuevoRouter(api.Dependencias{
+		Log:                  slog.New(slog.NewJSONHandler(&salida, nil)),
+		APIKeys:              map[string]string{claveA: "grupo-a"},
+		VerificarSalud:       func(context.Context) error { return nil },
+		HabilitarErrorPrueba: true,
+	}))
+	t.Cleanup(srv.Close)
+
+	r := pedir(t, srv, "GET", "/error", "", "", "")
+	esperarProblema(t, r, http.StatusInternalServerError, "error-simulado")
+	if !strings.Contains(salida.String(), `"level":"ERROR"`) ||
+		!strings.Contains(salida.String(), `"msg":"error de prueba simulado"`) {
+		t.Errorf("no se registró el evento de error estructurado: %s", salida.String())
+	}
+
+	respuestaMetricas, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("consultar métricas: %v", err)
+	}
+	defer respuestaMetricas.Body.Close()
+	cuerpoMetricas, err := io.ReadAll(respuestaMetricas.Body)
+	if err != nil {
+		t.Fatalf("leer métricas: %v", err)
+	}
+	if !strings.Contains(string(cuerpoMetricas), `route="/error"`) ||
+		!strings.Contains(string(cuerpoMetricas), `status_code="500"`) {
+		t.Errorf("no se encontró el contador de /error con estado 500")
+	}
+}
+
+func TestEndpointErrorPruebaDeshabilitadoPorDefecto(t *testing.T) {
+	srv, _ := nuevoServidor(t)
+	r := pedir(t, srv, "GET", "/error", "", "", "")
+	esperarProblema(t, r, http.StatusNotFound, "no-encontrado")
 }

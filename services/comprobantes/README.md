@@ -44,6 +44,16 @@ La clave de idempotencia es **por consumidor**: dos grupos pueden usar la misma 
 - **Importe máximo:** ningún precio ni el total pueden superar `9999999999.99` (el máximo de `DECIMAL(12,2)`); si no, `422`.
 - **Límite de solicitudes:** 60 por minuto por API Key, controlado por el propio servicio, porque esta API **no pasa por el gateway** ([ADR-008](../../docs/adr/ADR-008-contrato-propio.md)). Al superarlo responde `429` con `Retry-After`.
 - **Importes:** se guardan como `DECIMAL(12,2)` (nunca como punto flotante), así las sumas no acumulan errores de redondeo. Un precio con más de 2 decimales **se redondea** a 2 (al más cercano; el 5 redondea hacia arriba: `10.005` → `10.01`). Primero se redondea cada ítem y después se suma el total, así el total siempre coincide con la suma de los ítems que se devuelven. El hash de idempotencia se calcula sobre el cuerpo **original**, antes de redondear. Si después de redondear el total queda en cero (por ejemplo, un único ítem de `0.004`), responde `422`.
+- **Error de prueba:** `GET /error` devuelve `500` y registra un evento `ERROR` para validar métricas y logs. La ruta solo existe cuando `HABILITAR_ENDPOINT_ERROR_PRUEBA=true`; está desactivada por defecto para no exponerla accidentalmente.
+
+La ruta no cambia el comportamiento de las operaciones existentes, pero permanece deshabilitada por defecto para no publicar un endpoint deliberado de error accidentalmente. Para habilitarla en desarrollo local, configurá `HABILITAR_ENDPOINT_ERROR_PRUEBA=true` en `.env` y recreá el servicio desde la raíz:
+
+```bash
+docker compose up --build -d comprobantes
+curl -i http://localhost:8081/error
+```
+
+La respuesta esperada es `HTTP 500`. El middleware de métricas incrementa `http_requests_total` con `status_code="500"` y `slog` persiste el evento de nivel `ERROR` en `app_logs` de forma asíncrona. Esperá unos segundos para que Prometheus haga el scrape y el log se escriba; luego consultá el dashboard **Agencia de Viajes - Observabilidad** en Grafana. El endpoint de prueba no requiere API Key y debe permanecer desactivado fuera del entorno local.
 
 ## Modelo de datos
 
@@ -206,6 +216,21 @@ En el entorno completo (`docker compose up -d --build`):
 | Consumidor de `CompraConfirmada`, worker de envíos, publicador de outbox, PDF y SMTP | Implementados, con tests unitarios y de integración contra RabbitMQ real (testcontainers). SMTP con STARTTLS y autenticación para casillas reales |
 | Middleware HTTP y spans de consultas MySQL | Implementados con OpenTelemetry; Jaeger local recibe OTLP/HTTP |
 | Propagación W3C y span consumidor RabbitMQ | Implementados en `pkg/observabilidad`; la instrumentación del publicador queda pendiente de integrar con el trabajo RabbitMQ |
+| Logs estructurados en MySQL | Implementados: se mantienen en stdout y se persisten de forma asíncrona en `comprobantes.app_logs`; la cola es acotada y un fallo de persistencia no interrumpe el servicio |
+
+### Logs en MySQL y Grafana
+
+Al iniciar Comprobantes, `AutoMigrate` crea `app_logs` si todavía no existe. Cada registro guarda fecha UTC, nivel, servicio, mensaje, `correlacion_id`, `trace_id` y el resto de los atributos estructurados como JSON. Los logs continúan saliendo por stdout; una cola acotada los persiste en segundo plano. Si falla la escritura de un log, eso no bloquea ni hace fallar la solicitud: el problema se informa por stderr y, si la cola se llena, se descartan registros. Las operaciones de negocio que dependen de MySQL conservan su comportamiento actual ante una caída de esa base.
+
+Grafana aprovisiona `MySQL Logs` como una fuente de datos de solo lectura y `Prometheus` como la fuente de métricas. Para levantar el entorno, agregá `GRAFANA_DB_PASSWORD` a `.env` (podés partir de `.env.example`) y ejecutá desde la raíz:
+
+```bash
+docker compose up -d --build
+```
+
+`infra/mysql/init/02-usuarios.sh` crea el usuario `grafana` y le concede únicamente `SELECT` sobre `comprobantes.app_logs`; la cuenta no recibe permisos de escritura ni acceso a otras tablas. La contraseña se toma de `.env` y no se versiona.
+
+El script `infra/mysql/init/01-esquemas.sql` crea la tabla y los permisos al inicializar un volumen MySQL nuevo; `AutoMigrate` también crea la tabla en volúmenes existentes. Como los scripts de inicialización no se vuelven a ejecutar sobre un volumen ya creado, si ya tenías datos levantá Comprobantes y, una vez saludable, ejecutá una vez `docker compose exec -T mysql bash /docker-entrypoint-initdb.d/02-usuarios.sh` para crear o actualizar la cuenta de Grafana. No hay un dashboard aprovisionado todavía: las dos fuentes quedan disponibles para construirlo.
 
 ## Cómo correrlo
 

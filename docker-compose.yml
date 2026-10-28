@@ -11,6 +11,7 @@ services:
       RESERVAS_DB_PASSWORD: ${RESERVAS_DB_PASSWORD}
       COMPROBANTES_DB_PASSWORD: ${COMPROBANTES_DB_PASSWORD}
       USUARIOS_DB_PASSWORD: ${USUARIOS_DB_PASSWORD}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?Definí GRAFANA_DB_PASSWORD en .env}
     # Puerto en tu máquina; cambialo con MYSQL_PUERTO si ya tenés un MySQL instalado en el 3306.
     ports: ["${MYSQL_PUERTO:-3306}:3306"]
     volumes:
@@ -51,6 +52,32 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
     ports: ["16686:16686", "4318:4318"]
 
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports: ["9090:9090"]
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      comprobantes: { condition: service_started }
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment:
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?Definí GRAFANA_DB_PASSWORD en .env}
+    ports: ["3000:3000"]
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning/datasources/prometheus.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./infra/grafana/provisioning/datasources/mysql.yml:/etc/grafana/provisioning/datasources/mysql.yml:ro
+      - ./infra/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      prometheus: { condition: service_started }
+      comprobantes: { condition: service_healthy }
+
   comprobantes-mock:
     image: stoplight/prism:5
     # --multiprocess=false: el modo multiproceso (activado por defecto) falla al arrancar en las versiones recientes de la imagen.
@@ -80,6 +107,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_REMITENTE: ${SMTP_REMITENTE:-}
       COMPROBANTES_API_KEYS: ${COMPROBANTES_API_KEYS}
+      HABILITAR_ENDPOINT_ERROR_PRUEBA: ${HABILITAR_ENDPOINT_ERROR_PRUEBA:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports: ["8081:8080"]
     depends_on:
@@ -99,3 +127,5 @@ services:
 volumes:
   mysql-data:
   mongo-data:
+  prometheus-data:
+  grafana-data:

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"agencia/comprobantes/internal/adapters/api"
 	"agencia/comprobantes/internal/adapters/mysql"
@@ -11,11 +12,12 @@ import (
 )
 
 type config struct {
-	puertoHTTP string
-	mysql      mysql.Config
-	rabbit     rabbit.Config
-	smtp       smtp.Config
-	apiKeys    map[string]string
+	puertoHTTP           string
+	mysql                mysql.Config
+	rabbit               rabbit.Config
+	smtp                 smtp.Config
+	apiKeys              map[string]string
+	habilitarErrorPrueba bool
 }
 
 // cargarConfig lee la configuración de variables de entorno. Los secretos no
@@ -48,12 +50,15 @@ func cargarConfig() (config, error) {
 			Password:  os.Getenv("SMTP_PASSWORD"),
 		},
 	}
+	var err error
+	if cfg.habilitarErrorPrueba, err = strconv.ParseBool(conDefecto("HABILITAR_ENDPOINT_ERROR_PRUEBA", "false")); err != nil {
+		return config{}, fmt.Errorf("HABILITAR_ENDPOINT_ERROR_PRUEBA debe ser true o false: %w", err)
+	}
 	claves := requerida("COMPROBANTES_API_KEYS")
 
 	if len(faltantes) > 0 {
 		return config{}, fmt.Errorf("faltan variables de entorno: %v", faltantes)
 	}
-	var err error
 	if cfg.apiKeys, err = api.ParsearAPIKeys(claves); err != nil {
 		return config{}, err
 	}

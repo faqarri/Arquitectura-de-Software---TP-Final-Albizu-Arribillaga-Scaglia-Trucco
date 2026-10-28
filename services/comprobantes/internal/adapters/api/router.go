@@ -28,6 +28,8 @@ type Dependencias struct {
 	// TimeoutDependencias limita cuánto espera cada solicitud a la base (ADR-010).
 	// Si es cero se usa TimeoutPorDefecto.
 	TimeoutDependencias time.Duration
+	// HabilitarErrorPrueba registra GET /error solo en entornos que lo habilitan explícitamente.
+	HabilitarErrorPrueba bool
 }
 
 // TimeoutPorDefecto es el tiempo máximo que una solicitud espera a MySQL antes
@@ -39,10 +41,19 @@ func NuevoRouter(d Dependencias) *gin.Engine {
 		d.TimeoutDependencias = TimeoutPorDefecto
 	}
 	r := gin.New()
-	r.Use(gin.Recovery(), observabilidad.MiddlewareGin(d.Log))
+	r.Use(gin.Recovery(), observabilidad.MiddlewareMetricas(), observabilidad.MiddlewareGin(d.Log))
 
+	r.GET("/metrics", gin.WrapH(observabilidad.HandlerMetricas()))
 	// Sin autenticación: lo usan Docker y el balanceador para saber si la instancia está viva.
 	r.GET("/health", salud(d.Log, d.VerificarSalud))
+	if d.HabilitarErrorPrueba {
+		r.GET("/error", func(c *gin.Context) {
+			ctx := c.Request.Context()
+			observabilidad.Logger(ctx, d.Log).ErrorContext(ctx, "error de prueba simulado")
+			problema(c, http.StatusInternalServerError, "error-simulado",
+				"Error de prueba", "Se generó un error de prueba para validar la observabilidad.")
+		})
+	}
 
 	v1 := r.Group("/v1", autenticar(d.APIKeys), limitarSolicitudes(SolicitudesPorMinuto))
 	v1.POST("/comprobantes", emitir(d))

@@ -35,22 +35,40 @@ docker compose up -d --build
 
 > MySQL crea los esquemas y un usuario por servicio **solo la primera vez**, con el volumen vacío. Si ya habías levantado el entorno antes de esos cambios, ejecutá `docker compose down -v` y después `docker compose up -d` (borra los datos locales).
 
+Grafana requiere que `GRAFANA_DB_PASSWORD` esté definida en `.env`; se usa para la cuenta MySQL de solo lectura que consulta `comprobantes.app_logs`. No reutilices una contraseña real de otra cuenta.
+
+Si el puerto local `3306` ya está ocupado, configurá `MYSQL_PUERTO=3307` en `.env`; Compose seguirá conectando los servicios entre sí por la red interna. El endpoint de prueba `GET /error` devuelve HTTP 500 y registra un log `ERROR`, pero está desactivado por defecto (`HABILITAR_ENDPOINT_ERROR_PRUEBA=false`). Para habilitarlo en local, cambiá esa variable a `true` en `.env` y recreá Comprobantes con `docker compose up --build -d comprobantes`. Mantenelo deshabilitado en cualquier entorno compartido o desplegado.
+
 Componentes disponibles en esta etapa:
 
 | Componente | URL local |
 |---|---|
 | Servicio Comprobantes (API pública v1) | http://localhost:8081 (salud: `/health`) |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 (dashboard **Agencia de Viajes - Observabilidad**, carpeta **Observabilidad**) |
 | Mock del contrato de Comprobantes (Prism) | http://localhost:4010 |
 | RabbitMQ (management) | http://localhost:15672 |
 | Mailpit (bandeja de correo local) | http://localhost:8025 |
 | Jaeger (trazas distribuidas) | http://localhost:16686 |
 | OpenSearch | http://localhost:9200 |
 
-> Estado: Entrega 2 (23/10/2026). Están documentadas las decisiones D2, D6, D7, D9 (estrategia general, a completar cuando se asigne el proveedor), D10 y D13 (plan de pruebas y costos), además de D11 y D12 ([índice de ADRs](docs/adr/README.md)). Comprobantes tiene su esqueleto con dominio y casos de uso probados (ver [su README](services/comprobantes/README.md)); su API y sus colas están en implementación. Los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
+> Estado: Entrega 2 (28/10/2026). Están documentadas las decisiones D2, D6, D7, D9 (estrategia general, a completar cuando se asigne el proveedor), D10 y D13 (plan de pruebas y costos), además de D11 y D12 ([índice de ADRs](docs/adr/README.md)). Comprobantes tiene API, colas, persistencia de logs en MySQL y métricas HTTP. Prometheus y Grafana se aprovisionan con un dashboard inicial de métricas y logs. Los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
+
+> En esta etapa todavía no hay una aplicación frontend ejecutable ni un API Gateway implementado. La interfaz web está documentada como diseño en [frontend/README.md](frontend/README.md); las pruebas locales se hacen contra la API de Comprobantes en `http://localhost:8081` o el mock Prism en `http://localhost:4010`.
+
+### Observabilidad local
+
+Prometheus recolecta las métricas HTTP de Comprobantes desde `/metrics` cada 5 segundos. Grafana aprovisiona automáticamente Prometheus y MySQL como fuentes de datos y el dashboard unificado **Agencia de Viajes - Observabilidad**:
+
+- Tasa de solicitudes HTTP, latencia p95 y respuestas 5xx usando `http_requests_total` y `http_request_duration_seconds`.
+- Total de solicitudes para el rango seleccionado.
+- Una tabla con hasta 100 logs recientes de `comprobantes.app_logs`, incluidos nivel, servicio, mensaje, `correlacion_id`, `trace_id` y metadatos.
+
+El dashboard se actualiza cada 5 segundos. Los logs se filtran por el rango de tiempo elegido en Grafana; MySQL se consulta con un usuario que solo tiene permiso `SELECT` sobre `app_logs`. La persistencia de logs en base de datos está implementada en Comprobantes; no implica que los servicios todavía no implementados ya estén instrumentados.
 
 ### Código y tests
 
-El backend está en Go. Cada servicio es un módulo propio (`services/<servicio>/go.mod`) y `pkg/` es un módulo compartido con logs, correlación y trazas. El archivo `go.work` de la raíz los une para el editor y para correr todo junto:
+El backend está en Go. Cada servicio es un módulo propio (`services/<servicio>/go.mod`) y `pkg/` es un módulo compartido con logs, correlación, métricas y trazas. El archivo `go.work` de la raíz los une para el editor y para correr todo junto:
 
 ```bash
 go test ./pkg/... ./services/comprobantes/...

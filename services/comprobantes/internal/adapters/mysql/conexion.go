@@ -53,5 +53,5 @@ func Conectar(cfg Config) (*gorm.DB, error) {
 
 // Migrar crea o actualiza las tablas del servicio.
 func Migrar(db *gorm.DB) error {
-	return db.AutoMigrate(&comprobanteModelo{}, &itemModelo{}, &outboxModelo{})
+	return db.AutoMigrate(&comprobanteModelo{}, &itemModelo{}, &outboxModelo{}, &appLogModelo{})
 }

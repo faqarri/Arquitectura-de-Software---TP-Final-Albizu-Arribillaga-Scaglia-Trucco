@@ -62,6 +62,9 @@ func ejecutar(log *slog.Logger) error {
 	}
 	defer sqlDB.Close()
 
+	log, cerrarLogs := observabilidad.NuevoLoggerConMySQL(nombreServicio, sqlDB)
+	defer cerrarLogs()
+
 	// Adaptadores de salida.
 	repo := mysql.NuevoRepositorio(db)
 	generador := pdf.NuevoGenerador()
@@ -76,11 +79,12 @@ func ejecutar(log *slog.Logger) error {
 	servidor := &http.Server{
 		Addr: ":" + cfg.puertoHTTP,
 		Handler: api.NuevoRouter(api.Dependencias{
-			Log:            log,
-			Emitir:         emitir,
-			Obtener:        obtener,
-			APIKeys:        cfg.apiKeys,
-			VerificarSalud: sqlDB.PingContext,
+			Log:                  log,
+			Emitir:               emitir,
+			Obtener:              obtener,
+			APIKeys:              cfg.apiKeys,
+			VerificarSalud:       sqlDB.PingContext,
+			HabilitarErrorPrueba: cfg.habilitarErrorPrueba,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

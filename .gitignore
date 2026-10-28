@@ -1,4 +1,5 @@
 .env
+/GUIA-LOCAL.md
 *.log
 node_modules/
 dist/

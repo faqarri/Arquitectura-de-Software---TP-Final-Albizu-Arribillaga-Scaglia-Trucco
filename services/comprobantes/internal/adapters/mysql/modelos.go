@@ -49,3 +49,16 @@ type outboxModelo struct {
 }
 
 func (outboxModelo) TableName() string { return "outbox" }
+
+type appLogModelo struct {
+	ID            uint64    `gorm:"primaryKey;autoIncrement"`
+	Fecha         time.Time `gorm:"type:datetime(6);not null;index:idx_app_logs_fecha"`
+	Nivel         string    `gorm:"size:16;not null"`
+	Servicio      string    `gorm:"size:100;not null"`
+	Mensaje       string    `gorm:"type:text;not null"`
+	CorrelacionID *string   `gorm:"size:64;index:idx_app_logs_correlacion"`
+	TraceID       *string   `gorm:"type:char(32);index:idx_app_logs_trace"`
+	Metadatos     string    `gorm:"type:json;not null"`
+}
+
+func (appLogModelo) TableName() string { return "app_logs" }
