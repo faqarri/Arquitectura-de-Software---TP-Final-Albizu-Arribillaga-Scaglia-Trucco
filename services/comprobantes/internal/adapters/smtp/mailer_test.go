@@ -188,3 +188,22 @@ func TestArmarMensajeRechazaSaltosDeLineaEnEncabezados(t *testing.T) {
 		t.Fatal("se esperaba error por inyección de encabezados")
 	}
 }
+
+func TestArmarMensajeSinAdjunto(t *testing.T) {
+	b, err := armarMensaje("a@b.example", ports.Correo{Para: "c@d.example", Asunto: "Tu API Key", Cuerpo: "cmp_x"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := mail.ReadMessage(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, params, _ := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+	if _, err := mr.NextPart(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mr.NextPart(); err != io.EOF {
+		t.Errorf("sin contenido no debía haber parte de adjunto (err = %v)", err)
+	}
+}

@@ -54,7 +54,9 @@ func cargarConfig() (config, error) {
 	if cfg.habilitarErrorPrueba, err = strconv.ParseBool(conDefecto("HABILITAR_ENDPOINT_ERROR_PRUEBA", "false")); err != nil {
 		return config{}, fmt.Errorf("HABILITAR_ENDPOINT_ERROR_PRUEBA debe ser true o false: %w", err)
 	}
-	claves := requerida("COMPROBANTES_API_KEYS")
+	// Opcional: claves fijas para pruebas propias. Los grupos externos obtienen
+	// la suya con POST /v1/api-keys.
+	claves := os.Getenv("COMPROBANTES_API_KEYS")
 
 	if len(faltantes) > 0 {
 		return config{}, fmt.Errorf("faltan variables de entorno: %v", faltantes)

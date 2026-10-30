@@ -89,7 +89,7 @@ func nuevoServidor(t *testing.T) (*httptest.Server, *repoEnMemoria) {
 		Log:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Emitir:         application.NuevoEmitirComprobante(repo),
 		Obtener:        application.NuevoObtenerComprobante(repo),
-		APIKeys:        map[string]string{claveA: "grupo-a", claveB: "grupo-b"},
+		Autenticar:        application.NuevoAutenticarConsumidor(nil, map[string]string{claveA: "grupo-a", claveB: "grupo-b"}),
 		VerificarSalud: func(context.Context) error { return nil },
 	})
 	srv := httptest.NewServer(router)
@@ -322,7 +322,7 @@ func TestDependenciaLentaCortaPorTimeout(t *testing.T) {
 		Log:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Emitir:              application.NuevoEmitirComprobante(repo),
 		Obtener:             application.NuevoObtenerComprobante(repo),
-		APIKeys:             map[string]string{claveA: "grupo-a"},
+		Autenticar:             application.NuevoAutenticarConsumidor(nil, map[string]string{claveA: "grupo-a"}),
 		VerificarSalud:      func(context.Context) error { return nil },
 		TimeoutDependencias: 100 * time.Millisecond,
 	}))
@@ -365,7 +365,7 @@ func TestEndpointErrorPruebaRegistraErrorYMetrica500(t *testing.T) {
 	var salida bytes.Buffer
 	srv := httptest.NewServer(api.NuevoRouter(api.Dependencias{
 		Log:                  slog.New(slog.NewJSONHandler(&salida, nil)),
-		APIKeys:              map[string]string{claveA: "grupo-a"},
+		Autenticar:              application.NuevoAutenticarConsumidor(nil, map[string]string{claveA: "grupo-a"}),
 		VerificarSalud:       func(context.Context) error { return nil },
 		HabilitarErrorPrueba: true,
 	}))

@@ -21,8 +21,10 @@ type Dependencias struct {
 	Log     *slog.Logger
 	Emitir  *application.EmitirComprobante
 	Obtener *application.ObtenerComprobante
-	// APIKeys asocia cada API Key con el nombre del grupo consumidor.
-	APIKeys map[string]string
+	// Autenticar resuelve el grupo consumidor de cada X-API-Key.
+	Autenticar *application.AutenticarConsumidor
+	// Registrar atiende POST /v1/api-keys. Si es nil, la ruta no se registra.
+	Registrar *application.RegistrarConsumidor
 	// VerificarSalud devuelve error si una dependencia imprescindible no responde.
 	VerificarSalud func(context.Context) error
 	// TimeoutDependencias limita cuánto espera cada solicitud a la base (ADR-010).
@@ -55,7 +57,13 @@ func NuevoRouter(d Dependencias) *gin.Engine {
 		})
 	}
 
-	v1 := r.Group("/v1", autenticar(d.APIKeys), limitarSolicitudes(SolicitudesPorMinuto))
+	// Sin API Key: es como se obtiene una. Se limita por IP para que no sirva
+	// para mandar correos en masa.
+	if d.Registrar != nil {
+		r.POST("/v1/api-keys", registrar(d))
+	}
+
+	v1 := r.Group("/v1", autenticar(d), limitarSolicitudes(SolicitudesPorMinuto))
 	v1.POST("/comprobantes", emitir(d))
 	v1.GET("/comprobantes/:comprobanteId", obtener(d))
 

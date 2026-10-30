@@ -39,7 +39,12 @@ La clave de idempotencia es **por consumidor**: dos grupos pueden usar la misma 
 
 ## Reglas de la API pública
 
-- **Autenticación:** `X-API-Key`. Las claves válidas se configuran en `COMPROBANTES_API_KEYS` con el formato `grupo:clave,grupo:clave`. En la base se guarda el nombre del grupo (`consumidor`), nunca la clave.
+- **Autenticación:** `X-API-Key`. Cada grupo genera la suya con `POST /v1/api-keys` (`grupo` y `email`, sin autenticación), y la clave le llega **por correo** a ese email, nunca en la respuesta. En la base se guarda solo el hash SHA-256 de la clave (`api_keys`) y el grupo con su email (`consumidores`). El grupo es el `consumidor` de sus comprobantes.
+  - El primer registro asocia el grupo con el email. El mismo grupo con otro email responde `409`; con el mismo email recibe una clave adicional y las anteriores siguen vigentes (así un tercero no puede dejarlo sin servicio).
+  - El correo se envía antes de guardar la clave: si el envío falla, responde `503` y no queda una clave que nadie recibió.
+  - Límite: 5 registros válidos por hora por IP.
+  - `COMPROBANTES_API_KEYS` (opcional, formato `grupo:clave,grupo:clave`) define claves fijas para pruebas propias. Esos grupos y `interno` no se pueden registrar.
+  - Guía para el grupo consumidor: [GUIA-INTEGRACION.md](../../docs/contracts/comprobantes/v1/GUIA-INTEGRACION.md).
 - **Timeout contra MySQL:** cada solicitud espera a la base como máximo 2 segundos ([ADR-010](../../docs/adr/ADR-010-resiliencia.md)). Si MySQL está caído o lento, responde `503` con `Retry-After` y el consumidor reintenta con la misma `Idempotency-Key`. Cuando la base vuelve, el servicio se recupera solo. `GET /health` responde `503` mientras la base no responda.
 - **Importe máximo:** ningún precio ni el total pueden superar `9999999999.99` (el máximo de `DECIMAL(12,2)`); si no, `422`.
 - **Límite de solicitudes:** 60 por minuto por API Key, controlado por el propio servicio, porque esta API **no pasa por el gateway** ([ADR-008](../../docs/adr/ADR-008-contrato-propio.md)). Al superarlo responde `429` con `Retry-After`.
@@ -65,6 +70,8 @@ comprobantes(id UUID PK, nro BIGINT AUTO_INCREMENT UNIQUE, consumidor, idempoten
 items_comprobante(comprobante_id FK, orden, descripcion, precio DECIMAL(12,2),
                   PK (comprobante_id, orden))
 outbox(id PK, tipo, payload JSON, creado_en, publicado_en NULL)
+consumidores(grupo PK, email, creado_en)
+api_keys(hash_clave CHAR(64) PK, grupo, creado_en)   -- SHA-256 de la clave, nunca la clave
 ```
 
 `numero` (por ejemplo `B-0001-00000042`) se arma a partir de `nro`.
@@ -212,7 +219,8 @@ En el entorno completo (`docker compose up -d --build`):
 | Dominio y casos de uso | Implementados, con tests unitarios |
 | Conexión a MySQL, esquema (GORM `AutoMigrate`) y `GET /health` | Implementados |
 | Repositorio MySQL con outbox | Implementado, con tests de integración contra MySQL real (testcontainers; `go test -short` los saltea) |
-| API pública v1 (`POST` y `GET`), API Key y rate limit | Implementados según el contrato 1.0.2, con tests de cada respuesta (201, 200, 400, 401, 404, 409, 422, 429, 503) |
+| API pública v1 (`POST` y `GET`), API Key y rate limit | Implementados según el contrato 1.1.0, con tests de cada respuesta (201, 200, 400, 401, 404, 409, 422, 429, 503) |
+| Registro de API Keys (`POST /v1/api-keys`) | Implementado: clave enviada por correo, guardada como hash, con tests de la API y de integración del repositorio contra MySQL real |
 | Consumidor de `CompraConfirmada`, worker de envíos, publicador de outbox, PDF y SMTP | Implementados, con tests unitarios y de integración contra RabbitMQ real (testcontainers). SMTP con STARTTLS y autenticación para casillas reales |
 | Middleware HTTP y spans de consultas MySQL | Implementados con OpenTelemetry; Jaeger local recibe OTLP/HTTP |
 | Propagación W3C y span consumidor RabbitMQ | Implementados en `pkg/observabilidad`; la instrumentación del publicador queda pendiente de integrar con el trabajo RabbitMQ |

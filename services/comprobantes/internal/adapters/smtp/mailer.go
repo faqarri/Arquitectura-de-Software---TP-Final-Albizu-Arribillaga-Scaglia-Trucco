@@ -125,7 +125,7 @@ func (m *Mailer) entregar(ctx context.Context, para string, mensaje []byte) erro
 }
 
 // armarMensaje arma el correo en formato MIME: multipart/mixed con una parte de
-// texto (quoted-printable, UTF-8) y el adjunto en base64.
+// texto (quoted-printable, UTF-8) y, si lo hay, el adjunto en base64.
 func armarMensaje(remitente string, c ports.Correo, ahora time.Time) ([]byte, error) {
 	for _, v := range []string{remitente, c.Para, c.Asunto, c.Adjunto.Nombre} {
 		if strings.ContainsAny(v, "\r\n") {
@@ -154,16 +154,19 @@ func armarMensaje(remitente string, c ports.Correo, ahora time.Time) ([]byte, er
 		return nil, err
 	}
 
-	adjunto, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type":              {mime.FormatMediaType("application/pdf", map[string]string{"name": c.Adjunto.Nombre})},
-		"Content-Disposition":       {mime.FormatMediaType("attachment", map[string]string{"filename": c.Adjunto.Nombre})},
-		"Content-Transfer-Encoding": {"base64"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := escribirBase64(adjunto, c.Adjunto.Contenido); err != nil {
-		return nil, err
+	// El adjunto es opcional: el correo con la API Key no lleva PDF.
+	if len(c.Adjunto.Contenido) > 0 {
+		adjunto, err := mw.CreatePart(textproto.MIMEHeader{
+			"Content-Type":              {mime.FormatMediaType("application/pdf", map[string]string{"name": c.Adjunto.Nombre})},
+			"Content-Disposition":       {mime.FormatMediaType("attachment", map[string]string{"filename": c.Adjunto.Nombre})},
+			"Content-Transfer-Encoding": {"base64"},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := escribirBase64(adjunto, c.Adjunto.Contenido); err != nil {
+			return nil, err
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return nil, err

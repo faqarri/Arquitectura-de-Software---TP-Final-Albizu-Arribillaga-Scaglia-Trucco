@@ -37,6 +37,26 @@ type RepositorioComprobantes interface {
 	ActualizarEnvio(ctx context.Context, c *domain.Comprobante) error
 }
 
+// ErrGrupoRegistrado: el grupo ya está registrado con otro email.
+var ErrGrupoRegistrado = errors.New("el grupo ya está registrado con otro email")
+
+// RepositorioConsumidores guarda los grupos externos y sus API Keys. Nunca
+// recibe ni guarda la clave en claro: solo su hash SHA-256.
+type RepositorioConsumidores interface {
+	// EmailDelGrupo devuelve el email con el que se registró el grupo, o
+	// ErrNoEncontrado si el grupo no existe.
+	EmailDelGrupo(ctx context.Context, grupo string) (string, error)
+
+	// AgregarClave registra el grupo con ese email si no existía y le agrega la
+	// clave. Las claves anteriores del grupo siguen vigentes. Devuelve
+	// ErrGrupoRegistrado si el grupo existe con otro email.
+	AgregarClave(ctx context.Context, grupo, email, hashClave string) error
+
+	// GrupoPorClave devuelve el grupo dueño de la clave con ese hash, o
+	// ErrNoEncontrado.
+	GrupoPorClave(ctx context.Context, hashClave string) (string, error)
+}
+
 // GeneradorPDF genera la factura en PDF.
 type GeneradorPDF interface {
 	Generar(ctx context.Context, c *domain.Comprobante) ([]byte, error)

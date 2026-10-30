@@ -50,6 +50,26 @@ type outboxModelo struct {
 
 func (outboxModelo) TableName() string { return "outbox" }
 
+// consumidorModelo es un grupo externo registrado. El grupo es también el
+// "consumidor" de sus comprobantes; el email es al que se le mandan las claves.
+type consumidorModelo struct {
+	Grupo    string    `gorm:"size:50;primaryKey"`
+	Email    string    `gorm:"size:254;not null"`
+	CreadoEn time.Time `gorm:"autoCreateTime"`
+}
+
+func (consumidorModelo) TableName() string { return "consumidores" }
+
+// apiKeyModelo guarda el hash SHA-256 de cada API Key, nunca la clave. Grupo
+// siempre existe en consumidores: AgregarClave crea los dos en la misma transacción.
+type apiKeyModelo struct {
+	HashClave string    `gorm:"type:char(64);primaryKey"`
+	Grupo     string    `gorm:"size:50;not null;index"`
+	CreadoEn  time.Time `gorm:"autoCreateTime"`
+}
+
+func (apiKeyModelo) TableName() string { return "api_keys" }
+
 type appLogModelo struct {
 	ID            uint64    `gorm:"primaryKey;autoIncrement"`
 	Fecha         time.Time `gorm:"type:datetime(6);not null;index:idx_app_logs_fecha"`
