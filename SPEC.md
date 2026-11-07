@@ -133,6 +133,20 @@ Como **cliente** quiero registrarme e iniciar sesión para comprar.
 
 - El login devuelve un token de acceso; nunca devuelve la contraseña (RN-10).
 
+### HU-13 Compartir una guía de viaje
+Como **cliente que compró un viaje** quiero subir una guía en PDF de ese destino para compartirla con otros viajeros.
+
+- Solo puedo compartir guías de destinos de los que tengo una compra `CONFIRMADA`; si no, se informa que el destino no fue comprado.
+- La guía tiene título (3 a 150 caracteres), autor visible, destino, descripción opcional, hasta 10 etiquetas y un PDF de hasta 10 MB.
+- La publica el servicio de guías de otro grupo (Estudiario, [ADR-009](docs/adr/ADR-009-consumo-del-proveedor.md)), que la modera: veo si quedó **pendiente**, **publicada** o **rechazada** (con el motivo).
+- Si el servicio de guías no responde, la guía queda **por enviar** y se envía sola cuando vuelve; nunca se registra dos veces.
+
+### HU-14 Ver guías del destino
+Como **cliente** quiero ver en el detalle de una oferta las guías de viaje mejor calificadas de ese destino, para decidir la compra.
+
+- Se muestran las guías publicadas del destino, ordenadas por calificación.
+- Si el servicio de guías no responde, el detalle de la oferta se ve igual, con el aviso "Guías no disponibles por el momento".
+
 ## Fuera de alcance (por ahora)
 
 - Cancelaciones y reembolsos.
@@ -155,3 +169,4 @@ Como **cliente** quiero registrarme e iniciar sesión para comprar.
 | 2026-10-22 | **Renumeración de reglas:** RN-10 (pago simulado) → RN-09, sin la marca `[SUPUESTO]` (cambio del equipo); RN-11 (bcrypt) → RN-10. RN-01 a RN-08 conservan su número. | Consecuencia de quitar RN-09. |
 | 2026-10-22 | **Renumeración de historias:** HU-01 a HU-03 sin cambios; HU-04 nueva (retención); HU-05 nueva (agotado vs. retenido); HU-05 → HU-06; HU-06 → HU-07; HU-07 → HU-08; HU-08 → HU-09; HU-09 → HU-10; HU-10 → HU-11; HU-11 → HU-12. | Consecuencia de quitar la HU de sugerencias y agregar las de retención. |
 | 2026-10-22 | HU-07 indica que el comprobante se envía al email de la cuenta; HU-11 refleja el contrato 1.0.0 (solo email e ítems, envío siempre por correo). | Devolución de la Entrega 1: simplificación del contrato de Comprobantes ([ADR-008](docs/adr/ADR-008-contrato-propio.md)). |
+| 2026-11-07 | **Guías de viaje:** se agregan HU-13 (compartir una guía de un destino comprado) y HU-14 (ver las guías del destino en el detalle de la oferta), que usan la capacidad del proveedor asignado (Estudiario, Grupo 2). | Integración con el proveedor asignado por la cátedra ([ADR-009](docs/adr/ADR-009-consumo-del-proveedor.md)): la capacidad se usa en el flujo principal y con una regla de negocio (solo quien compró el destino puede compartir su guía). |

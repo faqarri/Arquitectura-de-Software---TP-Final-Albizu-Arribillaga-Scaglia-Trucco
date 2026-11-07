@@ -1,0 +1,276 @@
+openapi: 3.0.3
+info:
+  title: API interna de retenciones de Catálogo
+  version: 0.1.0
+  description: |
+    API interna (no publicada en el gateway) que usa **Reservas** para retener, liberar y
+    confirmar cupos. Diseño y garantías en ADR-014 y ADR-005.
+
+    **Estado: borrador para confirmar entre Catálogo (Albizu) y Reservas (Scaglia).**
+    Mientras Catálogo no exista, Reservas se prueba contra el mock de este archivo.
+
+    - Las tres operaciones son idempotentes, así que Reservas puede reintentarlas.
+    - Errores: `application/problem+json` con un campo `code`. El consumidor decide por
+      `status` y `code`, nunca por `title` o `detail`.
+    - Importes en ARS, como número con 2 decimales.
+servers:
+  - url: http://catalogo:8080
+    description: Catálogo en docker-compose
+  - url: http://localhost:4020
+    description: Mock local (Prism)
+paths:
+  /internal/retenciones:
+    post:
+      operationId: retener
+      summary: Retiene cupo de una oferta o de las opciones de un pack
+      description: |
+        Una oferta suelta (`ofertaId`) o un pack (`packId` + `opciones`, una oferta por tipo
+        como mínimo). Un pack retiene todas sus opciones en la misma transacción o ninguna.
+        Todas las retenciones creadas comparten `grupoId` y `expiraEn`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudRetencion'
+            examples:
+              oferta:
+                value:
+                  titularId: 5d2c9a1e-7b3f-4e8a-9c0d-1e2f3a4b5c6d
+                  ofertaId: of-vuelo-bariloche-0712
+                  cantidad: 2
+      responses:
+        '201':
+          description: Retenciones creadas (o las ya creadas con la misma Idempotency-Key).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrupoRetenido'
+              example:
+                grupoId: 8f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f
+                expiraEn: '2026-11-09T15:45:00Z'
+                retenciones:
+                  - id: 3a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d
+                    ofertaId: of-vuelo-bariloche-0712
+                    cantidad: 2
+                    descripcion: Vuelo Córdoba - Bariloche, 12/07
+                    destino: Bariloche
+                    precioReferencia: 185000.50
+        '404':
+          $ref: '#/components/responses/Problema'
+        '409':
+          description: |
+            Sin cupo libre. `code` = `AGOTADA` (todo vendido) o `RETENIDA` (lo tienen otros
+            carritos; `proximaLiberacion` dice cuándo vence la primera retención).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+              example:
+                title: Sin cupo
+                status: 409
+                code: RETENIDA
+                ofertaId: of-vuelo-bariloche-0712
+                proximaLiberacion: '2026-11-09T15:41:00Z'
+        '422':
+          description: 'Regla incumplida: `LIMITE_POR_CARRITO` (más de 6 cupos de la oferta) o `PACK_INVALIDO` (falta un tipo o las fechas no son coherentes).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+              example:
+                title: Regla incumplida
+                status: 422
+                code: LIMITE_POR_CARRITO
+                detail: No se pueden retener más de 6 cupos de la misma oferta.
+  /internal/retenciones/{retencionId}:
+    delete:
+      operationId: liberar
+      summary: Libera una retención (y todo su grupo si es de un pack)
+      parameters:
+        - name: retencionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Liberada, o ya estaba liberada, vencida o no existe.
+  /internal/retenciones/confirmacion:
+    post:
+      operationId: confirmar
+      summary: Confirma todas las retenciones de una compra (todo o nada)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SolicitudConfirmacion'
+            example:
+              compraId: 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+              titularId: 5d2c9a1e-7b3f-4e8a-9c0d-1e2f3a4b5c6d
+              retencionIds: [3a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d]
+      responses:
+        '200':
+          description: Confirmada. Un reintento con la misma clave devuelve la misma respuesta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Confirmacion'
+              example:
+                compraId: 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                lineas:
+                  - retencionId: 3a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d
+                    ofertaId: of-vuelo-bariloche-0712
+                    descripcion: Vuelo Córdoba - Bariloche, 12/07 x2
+                    destino: Bariloche
+                    precio: 371001.00
+                total: 371001.00
+        '409':
+          description: Alguna retención no está vigente (venció, se liberó o es de otro titular). No se confirmó ninguna.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problema'
+              example:
+                title: Retenciones no vigentes
+                status: 409
+                code: RETENCION_NO_VIGENTE
+                retencionIds: [3a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d]
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Al retener, una por ítem agregado. Al confirmar, el compraId.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 64
+  responses:
+    Problema:
+      description: Error con code (por ejemplo, OFERTA_INEXISTENTE).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problema'
+  schemas:
+    SolicitudRetencion:
+      type: object
+      required: [titularId]
+      properties:
+        titularId:
+          type: string
+          description: Id del usuario dueño del carrito.
+        ofertaId:
+          type: string
+          description: Oferta suelta. Excluyente con packId.
+        cantidad:
+          type: integer
+          minimum: 1
+          maximum: 6
+          default: 1
+        packId:
+          type: string
+        opciones:
+          type: array
+          items:
+            type: string
+          description: Ofertas elegidas del pack (al menos una de cada tipo).
+    GrupoRetenido:
+      type: object
+      required: [grupoId, expiraEn, retenciones]
+      properties:
+        grupoId:
+          type: string
+        expiraEn:
+          type: string
+          format: date-time
+        retenciones:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Retencion'
+    Retencion:
+      type: object
+      required: [id, ofertaId, cantidad, descripcion, destino, precioReferencia]
+      properties:
+        id:
+          type: string
+        ofertaId:
+          type: string
+        cantidad:
+          type: integer
+        descripcion:
+          type: string
+        destino:
+          type: string
+          description: Destino de la oferta. Reservas lo usa para las guías de viaje (HU-13).
+        precioReferencia:
+          type: number
+          description: Precio vigente por la cantidad retenida. Es solo referencia; el que se cobra sale al confirmar.
+    SolicitudConfirmacion:
+      type: object
+      required: [compraId, titularId, retencionIds]
+      properties:
+        compraId:
+          type: string
+        titularId:
+          type: string
+        retencionIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    Confirmacion:
+      type: object
+      required: [compraId, lineas, total]
+      properties:
+        compraId:
+          type: string
+        lineas:
+          type: array
+          items:
+            type: object
+            required: [retencionId, ofertaId, descripcion, destino, precio]
+            properties:
+              retencionId:
+                type: string
+              ofertaId:
+                type: string
+              descripcion:
+                type: string
+              destino:
+                type: string
+              precio:
+                type: number
+                description: Precio cobrado de la línea (cantidad incluida y descuento de pack aplicado).
+        total:
+          type: number
+    Problema:
+      type: object
+      required: [title, status, code]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+          enum: [AGOTADA, RETENIDA, LIMITE_POR_CARRITO, PACK_INVALIDO, OFERTA_INEXISTENTE, RETENCION_NO_VIGENTE]
+        detail:
+          type: string
+        ofertaId:
+          type: string
+        proximaLiberacion:
+          type: string
+          format: date-time
+        retencionIds:
+          type: array
+          items:
+            type: string

@@ -1,6 +1,6 @@
 # ADR-009: Consumo del proveedor
 
-- **Estado:** Propuesta (estrategia general; se completa cuando la cátedra asigne el grupo proveedor)
+- **Estado:** Aceptada (la cátedra asignó a Estudiario, Grupo 2; completada el 2026-11-07, ver [Revisiones](#revisiones))
 - **Fecha:** 2026-10-23
 - **Decisión de la cátedra:** D9
 
@@ -53,7 +53,7 @@ El frontend nunca llama al proveedor. Nuestro gateway no interviene: la llamada 
 
 ### Qué ve el usuario si el proveedor falla
 
-Depende de si la capacidad es imprescindible para el flujo. **[A COMPLETAR]** con una de estas dos opciones:
+Depende de si la capacidad es imprescindible para el flujo. Con Estudiario, **las dos operaciones son no imprescindibles** (ver la tabla del final): la consulta de guías se omite con un aviso y el registro de una guía queda `POR_ENVIAR` y se reintenta solo. Las dos opciones posibles eran:
 
 - **Imprescindible** (sin ella la operación no tiene sentido): la operación se rechaza rápido con un mensaje claro ("No pudimos completar X porque un servicio externo no responde; reintentá en unos minutos") y nada queda a medio hacer.
 - **No imprescindible:** la operación sigue sin ese dato o acción. Si la acción debe ocurrir igual (por ejemplo, notificar), se registra en un outbox y se reintenta de forma asíncrona, y el usuario ve "pendiente".
@@ -70,19 +70,19 @@ En ningún caso el usuario ve un error técnico ni espera más que el timeout to
 
 Métricas por proveedor y operación: cantidad de llamadas, latencia, errores por tipo, reintentos y estado del circuit breaker. Los logs incluyen el `X-Correlation-Id`, que también se envía al proveedor si su contrato lo admite.
 
-### [A COMPLETAR] cuando se asigne el proveedor
+### Proveedor asignado: Estudiario (Grupo 2)
 
 | Dato | Valor |
 |---|---|
-| Grupo proveedor y capacidad | |
-| URL y versión del contrato fijada | |
-| Autenticación (cómo se obtiene la credencial; se guarda en `.env`, nunca en el repositorio) | |
-| Flujo importante en el que se usa y consecuencia de negocio | |
-| Servicio consumidor | |
-| Operaciones usadas, si son idempotentes y cómo | |
-| Timeout definitivo (según su SLA) | |
-| Imprescindible o no, y mensaje que ve el usuario | |
-| Caída que se va a demostrar | |
+| Grupo proveedor y capacidad | **Estudiario (Grupo 2)**: registro y consulta de documentos PDF con moderación. La usamos para **guías de viaje** |
+| URL y versión del contrato fijada | Contrato **1.0.0** ([`documents-v1.yaml`](https://github.com/MichiSil/ProyectoEstudiario/blob/main/docs/contracts/documents-v1.yaml)), copia fijada en [`docs/contracts/consumidos/estudiario/1.0.0/`](../contracts/consumidos/estudiario/1.0.0/). URL pública: pendiente de que la publique el proveedor; mientras tanto, el mock `estudiario-mock` del docker-compose |
+| Autenticación | API Key en `X-API-Key`, entregada por el proveedor por mensaje privado. Va en `ESTUDIARIO_API_KEY` del `.env`, nunca en el repositorio |
+| Flujo importante y consecuencia de negocio | **Compartir una guía de viaje (HU-13):** solo un cliente con una compra `CONFIRMADA` de ese destino puede subir su guía en PDF; Estudiario la modera y el cliente ve si quedó publicada o rechazada (con motivo). **Ver guías del destino (HU-14):** el detalle de una oferta muestra las guías aprobadas del destino, mejor calificadas primero, como ayuda para decidir la compra |
+| Servicio consumidor | **Reservas** registra las guías (es el dueño de las compras que habilitan la regla). **Catálogo** consulta las guías del destino en el detalle de la oferta. Los dos usan el mismo adaptador, `pkg/estudiario` |
+| Operaciones usadas, si son idempotentes y cómo | `POST /v1/documents` (registrar): con `Idempotency-Key` = un UUID por guía, guardado en nuestra base y repetido en cada reintento. `GET /v1/submissions` (estado de moderación) y `GET /v1/documents` (buscar): lecturas, naturalmente idempotentes |
+| Timeout definitivo (según su SLA) | Lecturas: **2 s** por intento y 2 reintentos (200 y 400 ms), porque las pide un usuario que espera una pantalla; el proveedor promete menos de 2 s. Registro: **20 s** por intento y 3 reintentos (1, 2 y 4 s), como recomienda el proveedor, porque lo hace un proceso en segundo plano. Se reintenta solo ante error de red, timeout, `409`, `429` (respetando `Retry-After`, hasta 10 s) y `503` |
+| Imprescindible o no, y mensaje que ve el usuario | **No imprescindible.** Detalle de oferta: "Guías no disponibles por el momento" y el resto de la página se ve igual. Compartir guía: el cliente recibe `202` y ve la guía "por enviar"; Reservas la reenvía cada 30 s con la misma clave hasta que Estudiario la acepte. Un rechazo de validación queda "rechazada" con el motivo. Un `401` (nuestra API Key mal configurada) **no** rechaza la guía: sigue "por enviar" hasta corregir la clave |
+| Caída que se va a demostrar | Estudiario caído (`ESTUDIARIO_URL` a un puerto apagado, o el mock detenido): el circuito se abre a las 5 llamadas fallidas (métrica `estudiario_circuito_abierto`), la guía queda "por enviar" y se envía sola al volver; el detalle de la oferta muestra el aviso |
 
 ## Alternativas consideradas
 
@@ -99,3 +99,9 @@ Métricas por proveedor y operación: cantidad de llamadas, latencia, errores po
 - (−) Más código (puerto, adaptador, traducción de errores) que una llamada directa.
 - (−) Hasta que se asigne el proveedor, el flujo y la experiencia ante fallas no se pueden cerrar ni probar.
 - (−) Mantener la copia fijada del contrato exige revisarla cuando el proveedor publique versiones nuevas.
+
+## Revisiones
+
+| Fecha | Cambio | Motivo |
+|---|---|---|
+| 2026-11-07 | Se completa con el proveedor asignado (Estudiario, Grupo 2) y se implementa: adaptador compartido `pkg/estudiario` (tipos y errores propios, timeouts, reintentos, circuit breaker con métricas), consumo desde Reservas (registro de guías y seguimiento de la moderación) y copia fijada del contrato 1.0.0. **Test de contrato:** en lugar de `oasdiff`, se usa `kin-openapi` en `go test`: un mock armado a partir del YAML fijado valida cada solicitud de nuestro adaptador y le responde con todos los ejemplos del contrato (éxitos y errores, que el adaptador tiene que interpretar bien); otro test descarga el contrato publicado y falla si cambió la versión mayor, si desapareció una operación que usamos o si un campo que leemos dejó de ser obligatorio. Las lecturas usan 2 s de timeout y el registro 20 s (antes había un único valor). Un `401` se trata como falta de disponibilidad y no como rechazo de la guía. | Asignación del proveedor por la cátedra. `kin-openapi` cubre el test de consumidor y la detección de cambios incompatibles con la misma herramienta, sin red en el test principal y sin agregar otra dependencia. Separar los timeouts evita que un usuario espere 20 s por una lectura. Tratar el `401` como rechazo dejaría guías rechazadas para siempre por un error de configuración nuestro. |

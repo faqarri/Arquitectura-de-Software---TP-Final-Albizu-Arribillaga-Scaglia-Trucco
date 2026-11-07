@@ -1,0 +1,906 @@
+openapi: 3.0.3
+
+info:
+  title: Estudiario – Registro y consulta de documentos
+  version: 1.0.0
+  description: |
+    Capacidad publicada por **Estudiario** para que el sistema de otro grupo **registre
+    documentos** en el foro y **consulte los documentos publicados** (RF-13 del
+    [SPEC](../../SPEC.md)). La cátedra la asignó al **Grupo 4 (Agencia de viajes)**, que la
+    usa para **guías de viaje compartidas**; el contrato es genérico y sirve para cualquier
+    documento en PDF.
+
+    La expone directamente **forum-service** (no pasa por el api-gateway de Estudiario).
+    La guía de uso, la política de versionado y los ejemplos con `curl` están en
+    [`docs/contracts/README.md`](README.md). Las decisiones de diseño están en el
+    [ADR-014](../adr/ADR-014-contrato-documentos.md), que reemplaza al ADR-008.
+
+    ## Cómo funciona
+
+    1. El consumidor **registra** un documento: sus datos (título, descripción, categoría,
+       etiquetas y autor) y el archivo PDF. Queda **pendiente** de moderación (RN-19).
+    2. Un administrador de Estudiario lo **aprueba o lo rechaza**, con el mismo circuito que
+       los resúmenes del foro (RN-21, RN-22).
+    3. Los documentos **aprobados** se pueden **buscar** y **descargar**. Aparecen en la
+       búsqueda en, como máximo, **1 minuto** desde su aprobación (RN-26).
+    4. El consumidor ve el estado de **los documentos que registró** (pendiente, aprobado o
+       rechazado, con el motivo) en `GET /v1/submissions` o en el detalle.
+
+    ## Adaptación a guías de viaje
+
+    El contrato no tiene campos propios de ningún dominio. Para guías de viaje:
+
+    | Campo | Uso sugerido |
+    |---|---|
+    | `category` | Destino o tema de la guía (por ejemplo `Patagonia`). Es texto libre (RN-25) y es el filtro exacto de la búsqueda. |
+    | `tags` | Datos para filtrar: tipo de viaje, temporada, idioma (por ejemplo `trekking,invierno`). |
+    | `authorName` | Nombre visible de quien comparte la guía. |
+    | `authorExternalId` | Id del usuario en el sistema consumidor, para relacionar el documento con su cuenta. Estudiario no lo interpreta. |
+
+    ## Convenciones
+
+    - Fechas y horas en formato ISO 8601 con zona horaria (`2026-11-02T18:30:00-03:00`).
+    - Los errores siguen el formato *Problem Details* (RFC 9457) con un `code` estable,
+      que es el que hay que usar para decidir qué hacer.
+    - **Lector tolerante:** el consumidor debe ignorar los campos que no conozca y aceptar
+      valores nuevos en los campos enumerados (`status`, `source`). Agregarlos no es un
+      cambio incompatible (ver la política de versionado).
+  contact:
+    name: Grupo Estudiario – Arquitectura de Software 2026 (UCC)
+    url: https://github.com/MichiSil/ProyectoEstudiario
+
+servers:
+  - url: http://localhost:4010
+    description: Mock (Prism) generado a partir de este contrato
+  - url: http://localhost:8083
+    description: forum-service local (docker compose)
+
+tags:
+  - name: Documentos
+    description: Registro, búsqueda, detalle y descarga de documentos
+  - name: Estado
+    description: Disponibilidad del servicio
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /v1/documents:
+    post:
+      tags: [Documentos]
+      operationId: registerDocument
+      summary: Registrar un documento
+      description: |
+        Registra un documento con su archivo PDF. El documento queda **pendiente** de
+        moderación y **no aparece en la búsqueda** hasta que un administrador lo apruebe.
+
+        El cuerpo es `multipart/form-data`: un campo por dato del documento (`title`,
+        `description`, `category`, `tags`, `authorName`, `authorExternalId`) y el archivo en
+        `file` (PDF de hasta 10 MB, RN-20).
+
+        `Idempotency-Key` es obligatoria: un reintento con la misma clave y el mismo cuerpo
+        devuelve el mismo documento, sin registrarlo dos veces.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RegisterDocumentForm'
+            encoding:
+              file:
+                contentType: application/pdf
+      responses:
+        '202':
+          description: |
+            Documento registrado, **pendiente** de moderación. `Location` apunta a su detalle,
+            donde se puede seguir su estado.
+          headers:
+            Location:
+              description: Ruta del detalle del documento registrado.
+              schema:
+                type: string
+                example: /v1/documents/d7f3k2m9qx4p8r1s
+            Idempotent-Replayed:
+              $ref: '#/components/headers/IdempotentReplayed'
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+              examples:
+                pendiente:
+                  $ref: '#/components/examples/DocumentPending'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/FileTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedFileType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    get:
+      tags: [Documentos]
+      operationId: searchDocuments
+      summary: Buscar documentos publicados
+      description: |
+        Busca entre los documentos **aprobados**, de cualquier origen (los del foro de
+        Estudiario y los registrados por sistemas externos). Soporta texto libre, filtros,
+        orden y paginación (RF-19, RF-20). Un documento recién aprobado aparece en, como
+        máximo, 1 minuto (RN-26).
+      parameters:
+        - name: q
+          in: query
+          description: Texto a buscar en el título, la descripción y la categoría.
+          schema:
+            type: string
+            maxLength: 200
+          example: glaciares
+        - name: category
+          in: query
+          description: Filtro exacto por categoría (destino o tema), sin distinguir mayúsculas.
+          schema:
+            type: string
+            maxLength: 120
+          example: Patagonia
+        - name: tag
+          in: query
+          description: Filtro por etiqueta. Se puede repetir; devuelve los que tienen **todas** las indicadas.
+          schema:
+            type: array
+            items:
+              type: string
+              maxLength: 40
+            maxItems: 5
+          style: form
+          explode: true
+          example: [trekking]
+        - name: minRating
+          in: query
+          description: Calificación promedio mínima, de 1 a 5.
+          schema:
+            type: number
+            minimum: 1
+            maximum: 5
+          example: 4
+        - name: sort
+          in: query
+          description: |
+            Orden de los resultados. `relevance` es el valor por defecto si hay `q`; si no,
+            `date` (los más nuevos primero). `rating` ordena por promedio y, a igual
+            promedio, por cantidad de calificaciones.
+          schema:
+            type: string
+            enum: [relevance, rating, date]
+        - name: page
+          in: query
+          description: Número de página, desde 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          description: Resultados por página, como máximo 50 (RN-27).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de resultados.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentPage'
+              examples:
+                resultados:
+                  $ref: '#/components/examples/SearchResults'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/SearchUnavailable'
+
+  /v1/documents/{documentId}:
+    get:
+      tags: [Documentos]
+      operationId: getDocument
+      summary: Ver el detalle de un documento
+      description: |
+        Devuelve un documento **aprobado**, o uno de **cualquier estado** si lo registró la
+        misma API key (así el consumidor sigue la moderación de los suyos). Un documento que
+        no existe, que fue eliminado, o que es de otro y no está aprobado devuelve `404`.
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: El documento.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+              examples:
+                aprobado:
+                  $ref: '#/components/examples/DocumentApproved'
+                rechazado:
+                  $ref: '#/components/examples/DocumentRejected'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/documents/{documentId}/file:
+    get:
+      tags: [Documentos]
+      operationId: downloadDocumentFile
+      summary: Descargar el PDF de un documento
+      description: Mismas reglas de visibilidad que el detalle.
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: El archivo PDF.
+          headers:
+            Content-Disposition:
+              description: Nombre sugerido del archivo.
+              schema:
+                type: string
+                example: attachment; filename="guia-glaciares.pdf"
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/submissions:
+    get:
+      tags: [Documentos]
+      operationId: listSubmissions
+      summary: Listar los documentos que registré
+      description: |
+        Lista los documentos registrados con **esta API key**, en cualquier estado y del más
+        nuevo al más viejo. Sirve para seguir la moderación.
+      parameters:
+        - name: status
+          in: query
+          description: Filtrar por estado.
+          schema:
+            $ref: '#/components/schemas/DocumentStatus'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Página de documentos registrados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentPage'
+              examples:
+                registrados:
+                  $ref: '#/components/examples/Submissions'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /health:
+    get:
+      tags: [Estado]
+      operationId: health
+      summary: Estado del servicio
+      description: No requiere API key. `503` si forum-service no puede atender pedidos.
+      security: []
+      responses:
+        '200':
+          description: El servicio puede atender pedidos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: ok
+                service: forum-service
+        '503':
+          description: El servicio no puede atender pedidos (por ejemplo, la base no responde).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: degraded
+                service: forum-service
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Una API key por grupo consumidor. Se entrega por un canal privado y nunca se sube a
+        un repositorio. Identifica al consumidor para el cupo de uso, la idempotencia y la
+        visibilidad de los documentos que registró.
+
+  parameters:
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      description: Id del documento.
+      schema:
+        type: string
+        pattern: '^[a-z0-9]{8,40}$'
+      example: d7f3k2m9qx4p8r1s
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Clave única por registro (se recomienda un UUID v4). Misma clave y mismo cuerpo
+        dentro de las 24 h devuelven el mismo documento (`Idempotent-Replayed: true`); misma
+        clave con otro cuerpo devuelve `422 IDEMPOTENCY_KEY_REUSED`.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 100
+      example: 3f8a9c1e-5b7d-4e8a-9c21-7d4e5f6a8b90
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Identificador para seguir el pedido en los logs de los dos sistemas. Si no viene, se genera.
+      schema:
+        type: string
+        maxLength: 100
+      example: viajes-7f3a2c
+
+  headers:
+    CorrelationId:
+      description: El identificador de correlación del pedido (el recibido o uno generado).
+      schema:
+        type: string
+    IdempotentReplayed:
+      description: '`true` cuando la respuesta es la guardada de un registro anterior con la misma clave.'
+      schema:
+        type: boolean
+    RetryAfter:
+      description: Segundos que conviene esperar antes de reintentar.
+      schema:
+        type: integer
+    RateLimitLimit:
+      description: Pedidos permitidos por minuto para esta API key.
+      schema:
+        type: integer
+    RateLimitRemaining:
+      description: Pedidos que quedan en el minuto actual.
+      schema:
+        type: integer
+
+  schemas:
+    RegisterDocumentForm:
+      type: object
+      required: [title, category, authorName, file]
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 150
+          example: Guía de trekking en los glaciares
+        description:
+          type: string
+          maxLength: 2000
+          example: Recorridos de uno a tres días, refugios y qué llevar en cada temporada.
+        category:
+          type: string
+          minLength: 2
+          maxLength: 120
+          description: Destino o tema. Texto libre (RN-25).
+          example: Patagonia
+        tags:
+          type: string
+          maxLength: 300
+          description: |
+            Etiquetas separadas por comas, hasta 10, de 2 a 40 caracteres cada una
+            (por ejemplo `trekking,invierno`). Se guardan sin espacios a los costados y sin repetir.
+          example: trekking,invierno
+        authorName:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: Nombre visible de quien comparte el documento.
+          example: Lucía Fernández
+        authorExternalId:
+          type: string
+          maxLength: 100
+          description: Id del autor en el sistema consumidor. Estudiario lo guarda tal cual y no lo interpreta.
+          example: viajero-1842
+        file:
+          type: string
+          format: binary
+          description: Archivo PDF de hasta 10 MB (RN-20).
+
+    DocumentStatus:
+      type: string
+      description: |
+        `pendiente`: esperando moderación · `aprobado`: publicado, aparece en la búsqueda ·
+        `rechazado`: no se publica; `rejectionReason` dice por qué.
+      enum: [pendiente, aprobado, rechazado]
+
+    Document:
+      type: object
+      required: [id, title, category, tags, status, source, author, rating, file, createdAt]
+      properties:
+        id:
+          type: string
+          example: d7f3k2m9qx4p8r1s
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          $ref: '#/components/schemas/DocumentStatus'
+        rejectionReason:
+          type: string
+          nullable: true
+          description: Motivo del rechazo (RN-22). Sólo cuando `status` es `rechazado`.
+        source:
+          type: string
+          enum: [estudiario, externo]
+          description: '`estudiario` si lo subió un estudiante en el foro; `externo` si lo registró un sistema consumidor.'
+        author:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+            externalId:
+              type: string
+              nullable: true
+              description: Sólo se devuelve a la API key que registró el documento.
+        rating:
+          $ref: '#/components/schemas/Rating'
+        file:
+          $ref: '#/components/schemas/FileInfo'
+        createdAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Momento de la aprobación. `null` si no está aprobado.
+
+    Rating:
+      type: object
+      required: [average, count]
+      description: Calificación de los estudiantes de Estudiario (RN-31). Sólo lectura.
+      properties:
+        average:
+          type: number
+          nullable: true
+          minimum: 1
+          maximum: 5
+          description: Promedio de 1 a 5, con un decimal. `null` si todavía no tiene calificaciones.
+        count:
+          type: integer
+          minimum: 0
+
+    FileInfo:
+      type: object
+      required: [contentType, sizeBytes, downloadPath]
+      properties:
+        contentType:
+          type: string
+          enum: [application/pdf]
+        sizeBytes:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+        downloadPath:
+          type: string
+          description: Ruta para descargar el PDF (`GET`), relativa a la URL base.
+          example: /v1/documents/d7f3k2m9qx4p8r1s/file
+
+    DocumentPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Document'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          description: Cantidad total de resultados.
+
+    Health:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        service:
+          type: string
+
+    Problem:
+      type: object
+      description: Error en formato Problem Details (RFC 9457).
+      required: [type, title, status, code, detail]
+      properties:
+        type:
+          type: string
+          example: about:blank
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+          description: Código estable para decidir qué hacer. Ver la tabla de errores del README.
+        detail:
+          type: string
+        correlationId:
+          type: string
+        errors:
+          type: array
+          description: Errores por campo, en las validaciones.
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+                example: title
+              message:
+                type: string
+
+  responses:
+    BadRequest:
+      description: No se pudo leer el pedido (cuerpo mal formado, falta una parte o un encabezado).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Bad Request
+            status: 400
+            code: MALFORMED_REQUEST
+            detail: falta la parte "file" del formulario
+            correlationId: viajes-7f3a2c
+    Unauthorized:
+      description: Falta la API key o no es válida.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            code: UNAUTHENTICATED
+            detail: falta el encabezado X-API-Key o no es válido
+            correlationId: viajes-7f3a2c
+    NotFound:
+      description: El documento no existe, fue eliminado, o es de otro consumidor y no está aprobado.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Not Found
+            status: 404
+            code: NOT_FOUND
+            detail: el documento no existe
+            correlationId: viajes-7f3a2c
+    Conflict:
+      description: Hay un registro en curso con la misma `Idempotency-Key`. Reintentar en unos segundos.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Conflict
+            status: 409
+            code: REQUEST_IN_PROGRESS
+            detail: hay un registro en curso con la misma clave de idempotencia
+            correlationId: viajes-7f3a2c
+    FileTooLarge:
+      description: El archivo pesa más de 10 MB (RN-20).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Content Too Large
+            status: 413
+            code: FILE_TOO_LARGE
+            detail: el archivo pesa 12,4 MB y el máximo es 10 MB
+            correlationId: viajes-7f3a2c
+    UnsupportedFileType:
+      description: El archivo no es un PDF (RN-20).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Unsupported Media Type
+            status: 415
+            code: UNSUPPORTED_FILE_TYPE
+            detail: el archivo tiene que ser PDF
+            correlationId: viajes-7f3a2c
+    UnprocessableEntity:
+      description: Datos inválidos, o la clave de idempotencia se usó con otro cuerpo.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            validacion:
+              value:
+                type: about:blank
+                title: Unprocessable Entity
+                status: 422
+                code: VALIDATION_ERROR
+                detail: hay campos inválidos
+                correlationId: viajes-7f3a2c
+                errors:
+                  - field: title
+                    message: tiene que tener entre 3 y 150 caracteres
+            claveReusada:
+              value:
+                type: about:blank
+                title: Unprocessable Entity
+                status: 422
+                code: IDEMPOTENCY_KEY_REUSED
+                detail: la clave de idempotencia ya se usó con otro documento
+                correlationId: viajes-7f3a2c
+    TooManyRequests:
+      description: Se superó el cupo de uso de la API key.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Too Many Requests
+            status: 429
+            code: RATE_LIMITED
+            detail: se superó el cupo de 60 pedidos por minuto
+            correlationId: viajes-7f3a2c
+    ServiceUnavailable:
+      description: forum-service no puede atender el pedido en este momento (por ejemplo, la base no responde). Reintentar más tarde.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Service Unavailable
+            status: 503
+            code: SERVICE_UNAVAILABLE
+            detail: el servicio no está disponible en este momento, probá de nuevo en unos segundos
+            correlationId: viajes-7f3a2c
+    SearchUnavailable:
+      description: El motor de búsqueda no responde. El detalle y la descarga de un documento siguen funcionando.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Service Unavailable
+            status: 503
+            code: SEARCH_UNAVAILABLE
+            detail: la búsqueda no está disponible en este momento
+            correlationId: viajes-7f3a2c
+
+  examples:
+    DocumentPending:
+      summary: Documento recién registrado, pendiente de moderación
+      value:
+        id: d7f3k2m9qx4p8r1s
+        title: Guía de trekking en los glaciares
+        description: Recorridos de uno a tres días, refugios y qué llevar en cada temporada.
+        category: Patagonia
+        tags: [trekking, invierno]
+        status: pendiente
+        rejectionReason: null
+        source: externo
+        author:
+          name: Lucía Fernández
+          externalId: viajero-1842
+        rating:
+          average: null
+          count: 0
+        file:
+          contentType: application/pdf
+          sizeBytes: 2481152
+          downloadPath: /v1/documents/d7f3k2m9qx4p8r1s/file
+        createdAt: '2026-11-02T18:30:00-03:00'
+        publishedAt: null
+    DocumentApproved:
+      summary: Documento aprobado (visible para cualquier consumidor)
+      value:
+        id: d7f3k2m9qx4p8r1s
+        title: Guía de trekking en los glaciares
+        description: Recorridos de uno a tres días, refugios y qué llevar en cada temporada.
+        category: Patagonia
+        tags: [trekking, invierno]
+        status: aprobado
+        rejectionReason: null
+        source: externo
+        author:
+          name: Lucía Fernández
+          externalId: viajero-1842
+        rating:
+          average: 4.6
+          count: 12
+        file:
+          contentType: application/pdf
+          sizeBytes: 2481152
+          downloadPath: /v1/documents/d7f3k2m9qx4p8r1s/file
+        createdAt: '2026-11-02T18:30:00-03:00'
+        publishedAt: '2026-11-02T19:05:00-03:00'
+    DocumentRejected:
+      summary: Documento rechazado (sólo lo ve la API key que lo registró)
+      value:
+        id: h2n8v5c1wz6t3y9a
+        title: Mapa de la ciudad
+        description: Mapa escaneado.
+        category: Córdoba
+        tags: [ciudad]
+        status: rechazado
+        rejectionReason: El archivo no se puede leer; subí una versión con mejor resolución.
+        source: externo
+        author:
+          name: Martín Gómez
+          externalId: viajero-2210
+        rating:
+          average: null
+          count: 0
+        file:
+          contentType: application/pdf
+          sizeBytes: 912384
+          downloadPath: /v1/documents/h2n8v5c1wz6t3y9a/file
+        createdAt: '2026-11-01T10:12:00-03:00'
+        publishedAt: null
+    SearchResults:
+      summary: Primera página de una búsqueda
+      value:
+        items:
+          - id: d7f3k2m9qx4p8r1s
+            title: Guía de trekking en los glaciares
+            description: Recorridos de uno a tres días, refugios y qué llevar en cada temporada.
+            category: Patagonia
+            tags: [trekking, invierno]
+            status: aprobado
+            rejectionReason: null
+            source: externo
+            author:
+              name: Lucía Fernández
+            rating:
+              average: 4.6
+              count: 12
+            file:
+              contentType: application/pdf
+              sizeBytes: 2481152
+              downloadPath: /v1/documents/d7f3k2m9qx4p8r1s/file
+            createdAt: '2026-11-02T18:30:00-03:00'
+            publishedAt: '2026-11-02T19:05:00-03:00'
+        page: 1
+        size: 20
+        total: 1
+    Submissions:
+      summary: Documentos registrados por esta API key
+      value:
+        items:
+          - id: d7f3k2m9qx4p8r1s
+            title: Guía de trekking en los glaciares
+            description: Recorridos de uno a tres días, refugios y qué llevar en cada temporada.
+            category: Patagonia
+            tags: [trekking, invierno]
+            status: pendiente
+            rejectionReason: null
+            source: externo
+            author:
+              name: Lucía Fernández
+              externalId: viajero-1842
+            rating:
+              average: null
+              count: 0
+            file:
+              contentType: application/pdf
+              sizeBytes: 2481152
+              downloadPath: /v1/documents/d7f3k2m9qx4p8r1s/file
+            createdAt: '2026-11-02T18:30:00-03:00'
+            publishedAt: null
+        page: 1
+        size: 20
+        total: 1

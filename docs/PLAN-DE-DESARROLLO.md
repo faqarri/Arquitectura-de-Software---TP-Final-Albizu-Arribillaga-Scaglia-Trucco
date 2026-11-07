@@ -344,3 +344,4 @@ Cada uno defiende **todo** el sistema. El martes a la noche, o el día que quede
 | Fecha | Cambio | Motivo |
 |---|---|---|
 | 2026-11-07 | Versión inicial | Reparto del trabajo pendiente para la presentación grupal, con el proveedor ya asignado (Estudiario, Grupo 2) |
+| 2026-11-07 | Avance de Scaglia: Reservas implementado (carrito, compra con recuperación, `CompraConfirmada`, `RetencionVencida`, guías), adaptador de Estudiario con test de contrato (`pkg/estudiario`), `pkg/mensajeria` compartido y arreglo del arranque en frío. El contrato interno de retenciones (paso 3.1) lo redactó Scaglia como borrador en `docs/contracts/internos/`: **Albizu lo tiene que confirmar o corregir**. | Reservas no podía avanzar sin ese contrato. |
