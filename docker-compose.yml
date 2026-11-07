@@ -166,12 +166,22 @@ services:
       - ./docs/contracts/consumidos/estudiario/1.0.0/documents-v1.yaml:/contracts/documents-v1.yaml:ro
     ports: ["4030:4010"]
 
+  # Frontend (React + Vite) servido por nginx, que deriva /api al gateway.
+  # Mientras el gateway no exista usa datos de demostración (FRONTEND_DATOS_FALSOS=false para el gateway).
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_DATOS_FALSOS: ${FRONTEND_DATOS_FALSOS:-true}
+    environment:
+      GATEWAY_URL: ${FRONTEND_GATEWAY_URL:-http://gateway:8080}
+    ports: ["5173:80"]
+
   # --- Servicios que se habilitan a medida que se implementan ---
   # gateway:      { build: ./gateway, ports: ["8080:8080"], env_file: .env }
   # usuarios:     { build: ./services/usuarios, env_file: .env, depends_on: [mysql] }
   # catalogo:     { build: ./services/catalogo, env_file: .env, depends_on: [mongo, mysql, opensearch, rabbitmq] }  # mysql: inventario y retenciones (ADR-014)
   # tiempo-real:  { build: ./services/tiempo-real, env_file: .env, depends_on: [rabbitmq] }  # sin estado, SSE vía gateway (ADR-015)
-  # frontend:     { build: ./frontend, ports: ["5173:5173"] }
 
 volumes:
   mysql-data:
