@@ -1,13 +1,13 @@
 openapi: 3.0.3
 info:
   title: API interna de retenciones de Catálogo
-  version: 0.1.0
+  version: 1.0.0
   description: |
     API interna (no publicada en el gateway) que usa **Reservas** para retener, liberar y
     confirmar cupos. Diseño y garantías en ADR-014 y ADR-005.
 
-    **Estado: borrador para confirmar entre Catálogo (Albizu) y Reservas (Scaglia).**
-    Mientras Catálogo no exista, Reservas se prueba contra el mock de este archivo.
+    **Estado: confirmado por Catálogo (Albizu) e implementado en `services/catalogo`.**
+    El mock de este archivo (`catalogo-mock`) sigue disponible para probar Reservas sin Catálogo.
 
     - Las tres operaciones son idempotentes, así que Reservas puede reintentarlas.
     - Errores: `application/problem+json` con un campo `code`. El consumidor decide por
@@ -128,8 +128,8 @@ paths:
                     ofertaId: of-vuelo-bariloche-0712
                     descripcion: Vuelo Córdoba - Bariloche, 12/07 x2
                     destino: Bariloche
-                    precio: 371001.00
-                total: 371001.00
+                    precio: 370001.00
+                total: 370001.00
         '409':
           description: Alguna retención no está vigente (venció, se liberó o es de otro titular). No se confirmó ninguna.
           content:
@@ -267,6 +267,9 @@ components:
           type: string
         ofertaId:
           type: string
+        libres:
+          type: integer
+          description: Cupos libres de la oferta en ese momento (solo en los 409 AGOTADA y RETENIDA).
         proximaLiberacion:
           type: string
           format: date-time

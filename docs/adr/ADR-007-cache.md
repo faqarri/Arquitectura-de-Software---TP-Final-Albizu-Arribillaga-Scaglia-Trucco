@@ -86,3 +86,9 @@ La caché es **opcional**: Catálogo funciona sin ella.
 - (−) Un componente más que operar: Redis debe agregarse a `docker-compose.yml`.
 - (−) El detalle puede mostrar un dato viejo por la carrera descrita, en general por alrededor de un segundo y como máximo 10 minutos.
 - (−) Si la hipótesis de concentración de la demanda no se cumple, la tasa de aciertos será baja; la medición lo va a mostrar.
+
+## Revisiones
+
+| Fecha | Cambio | Motivo |
+|---|---|---|
+| 2026-11-09 | **Implementada en Catálogo** tal como se decidió: Redis 7 (`maxmemory 128mb`, `allkeys-lru`) compartido por `catalogo-1` y `catalogo-2`, cache-aside con `oferta:v1:{id}`, TTL de 10 min más hasta 60 s al azar, borrado al escribir y al consumir `OfertaActualizada` (cola `catalogo.cache`), timeout de 50 ms y 30 s sin consultar Redis después de 5 errores seguidos. `/health` no depende de Redis. La disponibilidad no se cachea. Se agregan las guías de Estudiario por destino (`guias:v1:{destino}`, 5 min) para no gastar su cupo de 60 consultas por minuto. Métricas: `cache_consultas_total{tipo, resultado}`, `cache_errores_total`, `cache_circuito_abierto` y `catalogo_detalle_oferta_segundos{origen}` (histograma por origen `cache` o `mongo`); `CACHE_HABILITADA=false` apaga la caché para la medición sin caché. Verificado a mano: la primera lectura responde `X-Cache: MISS` en una instancia y la siguiente `X-Cache: HIT` en la otra. **Pendiente:** la prueba k6 antes y después (Arribillaga) y los paneles de tasa de aciertos en Grafana. | Implementación del plan de desarrollo (§4.1, paso 5). La decisión no cambia. |

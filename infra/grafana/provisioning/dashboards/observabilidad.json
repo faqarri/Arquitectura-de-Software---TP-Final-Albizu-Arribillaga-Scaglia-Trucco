@@ -183,8 +183,8 @@
     {
       "id": 5,
       "type": "table",
-      "title": "Logs recientes de Comprobantes",
-      "description": "Hasta 100 registros recientes de app_logs para el rango de tiempo seleccionado.",
+      "title": "Logs recientes de los servicios",
+      "description": "Hasta 100 registros recientes de app_logs de Comprobantes, Reservas y Catálogo para el rango de tiempo seleccionado. Filtrá por correlacion_id o trace_id para seguir una operación entre servicios.",
       "datasource": {
         "type": "mysql",
         "uid": "mysql-logs"
@@ -216,8 +216,241 @@
             "uid": "mysql-logs"
           },
           "format": "table",
-          "rawSql": "SELECT fecha AS time, nivel, servicio, mensaje, correlacion_id, trace_id, metadatos FROM app_logs WHERE $__timeFilter(fecha) ORDER BY fecha DESC LIMIT 100",
+          "rawSql": "SELECT * FROM (SELECT fecha AS time, nivel, servicio, mensaje, correlacion_id, trace_id, metadatos FROM comprobantes.app_logs WHERE $__timeFilter(fecha) UNION ALL SELECT fecha, nivel, servicio, mensaje, correlacion_id, trace_id, metadatos FROM reservas.app_logs WHERE $__timeFilter(fecha) UNION ALL SELECT fecha, nivel, servicio, mensaje, correlacion_id, trace_id, metadatos FROM catalogo.app_logs WHERE $__timeFilter(fecha)) AS logs ORDER BY time DESC LIMIT 100",
           "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Catálogo: solicitudes por instancia",
+      "description": "Cómo reparte el tráfico el balanceo entre catalogo-1 y catalogo-2 (ADR-012). Si una instancia cae, su línea baja a cero y la otra absorbe el tráfico.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(http_requests_total{job=\"catalogo\", route!=\"/health\"}[$__rate_interval]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Catálogo: instancias activas",
+      "description": "Estado de cada instancia según Prometheus (up). 1 = respondiendo, 0 = caída.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Caída",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "Activa",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"catalogo\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Caché: tasa de aciertos del detalle",
+      "description": "Porcentaje de lecturas del detalle de oferta que salen de Redis (ADR-007, objetivo: 80 % o más).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(cache_consultas_total{tipo=\"oferta\", resultado=\"acierto\"}[$__rate_interval])) / sum(rate(cache_consultas_total{tipo=\"oferta\"}[$__rate_interval]))",
+          "legendFormat": "aciertos",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Detalle de oferta: latencia p95 por origen",
+      "description": "Cuánto tarda el detalle cuando sale de Redis (cache) y cuando sale de MongoDB (mongo). La diferencia es el impacto de la caché (ADR-007).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, origen) (rate(catalogo_detalle_oferta_segundos_bucket[$__rate_interval])))",
+          "legendFormat": "{{origen}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Caché: errores de Redis y corte",
+      "description": "Errores por segundo al usar Redis y si Catálogo dejó de consultarlo (1 = en pausa por errores seguidos). Es el panel de la caída de Redis en la jornada de fallas.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(cache_errores_total[$__rate_interval]))",
+          "legendFormat": "errores por segundo",
+          "refId": "A"
+        },
+        {
+          "expr": "max(cache_circuito_abierto)",
+          "legendFormat": "caché en pausa",
+          "refId": "B"
         }
       ]
     }

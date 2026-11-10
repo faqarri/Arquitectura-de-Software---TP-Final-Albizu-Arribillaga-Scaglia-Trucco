@@ -4,9 +4,13 @@ Interfaces entre nuestros propios servicios. No se publican a otros grupos ni pa
 
 ## API de retenciones de Catálogo (Reservas → Catálogo)
 
-- **Contrato:** [catalogo-retenciones.yaml](catalogo-retenciones.yaml), versión **0.1.0, borrador**. Lo redactó Reservas siguiendo [ADR-014](../../adr/ADR-014-cupos-en-catalogo-con-retencion.md) y [ADR-005](../../adr/ADR-005-comunicacion-entre-servicios.md); **lo tiene que confirmar Catálogo**. Si cambia, se actualiza el YAML y se sube la versión.
-- **Mock:** `catalogo-mock` en el docker-compose (`http://localhost:4020`).
-- **Verificación:** los tests de `services/reservas/internal/adapters/catalogo` validan contra este YAML cada solicitud que arma el cliente de Reservas. Catálogo debería validar sus respuestas contra el mismo archivo.
+- **Contrato:** [catalogo-retenciones.yaml](catalogo-retenciones.yaml), versión **1.0.0, confirmada**. Lo redactó Reservas siguiendo [ADR-014](../../adr/ADR-014-cupos-en-catalogo-con-retencion.md) y [ADR-005](../../adr/ADR-005-comunicacion-entre-servicios.md) y lo confirmó Catálogo al implementarlo. Si cambia, se actualiza el YAML y se sube la versión.
+- **Implementación:** `services/catalogo` (instancias `catalogo-1` y `catalogo-2`, alias de red `catalogo`). Reservas la usa por defecto (`CATALOGO_URL=http://catalogo:8080`).
+- **Mock:** `catalogo-mock` en el docker-compose (`http://localhost:4020`), para probar Reservas sin Catálogo (`CATALOGO_URL=http://catalogo-mock:4010`).
+- **Verificación:** los tests de `services/reservas/internal/adapters/catalogo` validan contra este YAML cada solicitud que arma el cliente de Reservas. Del lado de Catálogo, `services/catalogo/internal/handlers/contrato_integracion_test.go` valida contra este YAML cada respuesta de la API interna (201, 204, 200, 404, 409 y 422), con el router real y MySQL y MongoDB reales: si una respuesta se aparta del contrato, el test falla.
+- **Cambios de la 1.0.0 respecto del borrador 0.1.0** (compatibles: Reservas no necesita cambios):
+  - Se corrigió el ejemplo de la confirmación: 2 × 185000,50 = 370001,00 (decía 371001,00).
+  - Los `409` de `AGOTADA` y `RETENIDA` informan también `libres`, opcional.
 - **Agregados respecto de ADR-014:**
   - `descripcion`, `destino` y `precioReferencia` en cada retención: el carrito los muestra sin consultar a Catálogo.
   - `destino` en cada línea de la confirmación: lo usa la regla de las guías de viaje (HU-13).
