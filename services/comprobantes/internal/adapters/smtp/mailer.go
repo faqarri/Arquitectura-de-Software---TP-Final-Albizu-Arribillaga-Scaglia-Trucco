@@ -28,7 +28,8 @@ import (
 // mensaje en ese plazo, Enviar devuelve error y el worker lo reintenta.
 const TiempoMaximoEnvio = 10 * time.Second
 
-const nombreRemitente = "Agencia de Viajes"
+// nombreRemitente es el nombre que se muestra cuando el correo no trae uno.
+const nombreRemitente = "Comprobantes"
 
 // Config del servidor de correo. Sin Usuario no hay autenticación ni TLS (Mailpit
 // en local). Con Usuario se exige STARTTLS y se autentica con PLAIN.
@@ -176,9 +177,13 @@ func armarMensaje(remitente string, c ports.Correo, ahora time.Time) ([]byte, er
 	if _, d, ok := strings.Cut(remitente, "@"); ok && d != "" {
 		dominio = d
 	}
+	nombre := c.NombreRemitente
+	if nombre == "" {
+		nombre = nombreRemitente
+	}
 	var b bytes.Buffer
 	encabezados := []struct{ nombre, valor string }{
-		{"From", (&mail.Address{Name: nombreRemitente, Address: remitente}).String()},
+		{"From", (&mail.Address{Name: nombre, Address: remitente}).String()},
 		{"To", c.Para},
 		{"Subject", mime.QEncoding.Encode("utf-8", c.Asunto)},
 		{"Date", ahora.Format(time.RFC1123Z)},

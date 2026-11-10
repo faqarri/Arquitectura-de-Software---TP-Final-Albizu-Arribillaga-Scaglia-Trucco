@@ -36,11 +36,16 @@ func (uc *EnviarComprobante) Ejecutar(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("generar PDF: %w", err)
 	}
+	remitente := "" // nombre genérico: el comprobante es del negocio del grupo, no nuestro
+	if c.Consumidor == domain.ConsumidorInterno {
+		remitente = "Agencia de Viajes"
+	}
 	err = uc.mailer.Enviar(ctx, ports.Correo{
-		Para:    c.Email,
-		Asunto:  "Tu comprobante " + c.Numero(),
-		Cuerpo:  fmt.Sprintf("Adjuntamos el comprobante %s por un total de $ %s.", c.Numero(), c.Total.StringFixed(2)),
-		Adjunto: ports.Adjunto{Nombre: c.Numero() + ".pdf", Contenido: pdf},
+		NombreRemitente: remitente,
+		Para:            c.Email,
+		Asunto:          "Tu comprobante " + c.Numero(),
+		Cuerpo:          fmt.Sprintf("Adjuntamos el comprobante %s por un total de $ %s.", c.Numero(), c.Total.StringFixed(2)),
+		Adjunto:         ports.Adjunto{Nombre: c.Numero() + ".pdf", Contenido: pdf},
 	})
 	if err != nil {
 		return fmt.Errorf("enviar correo: %w", err)

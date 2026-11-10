@@ -79,3 +79,25 @@ func TestFormatoARS(t *testing.T) {
 		}
 	}
 }
+
+func TestElNombreDeLaAgenciaSoloVaEnLasComprasPropias(t *testing.T) {
+	interno := comprobante(t, domain.Item{Descripcion: "Pasaje", Precio: decimal.NewFromInt(10)})
+	externo := comprobante(t, domain.Item{Descripcion: "Entrada general", Precio: decimal.NewFromInt(10)})
+	externo.Consumidor = "grupo-5"
+
+	pdfInterno, err := NuevoGenerador().Generar(context.Background(), interno)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdfExterno, err := NuevoGenerador().Generar(context.Background(), externo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// El autor queda en los metadatos sin comprimir: sirve de testigo del encabezado.
+	if !bytes.Contains(pdfInterno, []byte(NombreAgencia)) {
+		t.Error("la factura de una compra propia debía llevar el nombre de la agencia")
+	}
+	if bytes.Contains(pdfExterno, []byte(NombreAgencia)) {
+		t.Error("la factura de un grupo externo no debe decir que es de la agencia")
+	}
+}

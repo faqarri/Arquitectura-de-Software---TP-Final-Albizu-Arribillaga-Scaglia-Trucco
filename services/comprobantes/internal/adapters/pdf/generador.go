@@ -28,6 +28,9 @@ const (
 	altoLinea   = 7.0
 )
 
+// NombreAgencia encabeza las facturas de las compras propias.
+const NombreAgencia = "Agencia de Viajes"
+
 type Generador struct{}
 
 func NuevoGenerador() *Generador { return &Generador{} }
@@ -47,11 +50,15 @@ func (g *Generador) Generar(ctx context.Context, c *domain.Comprobante) ([]byte,
 	// Las fuentes estándar usan cp1252: el traductor convierte acentos y eñes desde UTF-8.
 	tr := doc.UnicodeTranslatorFromDescriptor("")
 	doc.SetTitle(tr("Factura "+c.Numero()), false)
-	doc.SetAuthor("Agencia de Viajes", false)
 
 	doc.AddPage()
-	doc.SetFont("Helvetica", "B", 18)
-	doc.CellFormat(anchoUtil, 10, "Agencia de Viajes", "", 1, "L", false, 0, "")
+	// El nombre de la agencia solo va en las facturas de las compras propias: los
+	// grupos externos usan la API para sus propios negocios, que no son una agencia.
+	if c.Consumidor == domain.ConsumidorInterno {
+		doc.SetAuthor(NombreAgencia, false)
+		doc.SetFont("Helvetica", "B", 18)
+		doc.CellFormat(anchoUtil, 10, NombreAgencia, "", 1, "L", false, 0, "")
+	}
 	doc.SetFont("Helvetica", "B", 14)
 	doc.CellFormat(anchoUtil, 9, tr("Factura N.º "+c.Numero()), "", 1, "L", false, 0, "")
 	doc.Ln(2)

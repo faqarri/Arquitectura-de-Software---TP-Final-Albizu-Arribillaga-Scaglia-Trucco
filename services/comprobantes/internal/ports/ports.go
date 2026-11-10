@@ -70,10 +70,13 @@ type Adjunto struct {
 
 // Correo es un mensaje a enviar.
 type Correo struct {
-	Para    string
-	Asunto  string
-	Cuerpo  string
-	Adjunto Adjunto
+	// NombreRemitente es el nombre que ve el destinatario en "De". Vacío usa
+	// el nombre genérico del servicio.
+	NombreRemitente string
+	Para            string
+	Asunto          string
+	Cuerpo          string
+	Adjunto         Adjunto
 }
 
 // Mailer envía correos. Devuelve error si el servidor no aceptó el mensaje.

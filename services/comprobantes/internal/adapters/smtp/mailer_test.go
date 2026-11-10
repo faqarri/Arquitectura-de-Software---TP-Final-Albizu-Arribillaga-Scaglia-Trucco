@@ -207,3 +207,24 @@ func TestArmarMensajeSinAdjunto(t *testing.T) {
 		t.Errorf("sin contenido no debía haber parte de adjunto (err = %v)", err)
 	}
 }
+
+func TestArmarMensajeUsaElNombreDeRemitenteDelCorreo(t *testing.T) {
+	casos := map[string]string{"": nombreRemitente, "Agencia de Viajes": "Agencia de Viajes"}
+	for pedido, esperado := range casos {
+		b, err := armarMensaje("a@b.example", ports.Correo{NombreRemitente: pedido, Para: "c@d.example", Asunto: "x"}, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg, err := mail.ReadMessage(bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		de, err := mail.ParseAddress(msg.Header.Get("From"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if de.Name != esperado || de.Address != "a@b.example" {
+			t.Errorf("con %q: From = %q <%s>", pedido, de.Name, de.Address)
+		}
+	}
+}
