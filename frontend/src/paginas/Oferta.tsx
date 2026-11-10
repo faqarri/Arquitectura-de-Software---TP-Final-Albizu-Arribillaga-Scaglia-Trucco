@@ -12,6 +12,8 @@ import { MAX_CUPOS_POR_OFERTA, nombreTipo } from '../reglas'
 import { useSesion } from '../sesion/Sesion'
 import { nombreSubtipo } from './Buscar'
 import { Icono, IconoOferta } from '../componentes/Iconos'
+import { datosFalsos } from '../api'
+import { useEventos } from '../api/tiempoReal'
 
 const REFRESCO_DISPONIBILIDAD_MS = 15000
 
@@ -77,7 +79,16 @@ function Reservar({ oferta: o }: { oferta: TOferta }) {
   const [error, setError] = useState<unknown>()
   const [clave, setClave] = useState(() => nuevoId())
 
-  // Sin el servicio de tiempo real, la disponibilidad se vuelve a consultar cada tanto.
+  // Tiempo real (ADR-015): cada cambio de cupos de esta oferta llega por SSE y se
+  // vuelve a consultar el estado; al reconectar, también. La consulta periódica
+  // queda de respaldo por si el servicio de tiempo real no está.
+  useEventos(
+    datosFalsos ? null : `/tiempo-real/ofertas?ids=${encodeURIComponent(o.id)}`,
+    (nombre) => {
+      if (nombre === 'disponibilidad') disp.recargar()
+    },
+    disp.recargar,
+  )
   useCadaTanto(disp.recargar, REFRESCO_DISPONIBILIDAD_MS, !agregando)
 
   const enCarrito = items.filter((it) => it.ofertaId === o.id && Date.parse(it.expiraEn) > Date.now()).reduce((t, it) => t + it.cantidad, 0)

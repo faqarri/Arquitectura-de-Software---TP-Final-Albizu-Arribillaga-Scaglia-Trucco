@@ -302,11 +302,19 @@ func (c *catalogoFalso) Confirmar(_ context.Context, compraID, _ string, retenci
 type externasFalsas struct {
 	mu         sync.Mutex
 	err        error
+	colgado    bool     // simula un Estudiario que no responde: espera a que venza el contexto
 	registros  []string // idempotency keys recibidas
 	moderacion []ports.EstadoModeracion
 }
 
-func (e *externasFalsas) Registrar(_ context.Context, g domain.Guia, _ []byte) (string, error) {
+func (e *externasFalsas) Registrar(ctx context.Context, g domain.Guia, _ []byte) (string, error) {
+	e.mu.Lock()
+	colgado := e.colgado
+	e.mu.Unlock()
+	if colgado {
+		<-ctx.Done()
+		return "", ports.ErrGuiasNoDisponible
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.err != nil {

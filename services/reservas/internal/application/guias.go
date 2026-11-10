@@ -16,10 +16,19 @@ type Guias struct {
 	compras  ports.RepositorioCompras
 	externas ports.GuiasExternas
 	ahora    func() time.Time
+	// esperaEnvioInmediato acota el intento de envío dentro de la solicitud del
+	// cliente. Sin ese límite, con Estudiario caído los reintentos del registro
+	// superan el timeout del gateway (15 s) y el cliente recibe un 502 aunque la
+	// guía quedó guardada.
+	esperaEnvioInmediato time.Duration
 }
 
+// EsperaEnvioInmediato es el máximo que Compartir espera a Estudiario antes de
+// responder; lo que no se completa en ese tiempo lo termina EnviarPendientes.
+const EsperaEnvioInmediato = 8 * time.Second
+
 func NuevoGuias(repo ports.RepositorioGuias, compras ports.RepositorioCompras, externas ports.GuiasExternas) *Guias {
-	return &Guias{repo: repo, compras: compras, externas: externas, ahora: time.Now}
+	return &Guias{repo: repo, compras: compras, externas: externas, ahora: time.Now, esperaEnvioInmediato: EsperaEnvioInmediato}
 }
 
 // Compartir guarda la guía (solo de un destino comprado) y trata de enviarla en
@@ -41,13 +50,22 @@ func (uc *Guias) Compartir(ctx context.Context, usuarioID string, s domain.Solic
 	if err := uc.repo.Crear(ctx, g, s.PDF); err != nil {
 		return nil, err
 	}
-	_ = uc.enviar(ctx, g, s.PDF) // si falla, queda POR_ENVIAR
+	_ = uc.enviar(ctx, g, s.PDF, uc.esperaEnvioInmediato) // si falla o tarda, queda POR_ENVIAR
 	return g, nil
 }
 
-// enviar registra la guía en Estudiario y guarda el resultado.
-func (uc *Guias) enviar(ctx context.Context, g *domain.Guia, pdf []byte) error {
-	id, err := uc.externas.Registrar(ctx, *g, pdf)
+// enviar registra la guía en Estudiario y guarda el resultado. Con limite > 0,
+// el registro se corta a ese tiempo; el resultado se guarda igual con ctx. Si el
+// corte llega después de que Estudiario la aceptó, el reenvío usa la misma
+// Idempotency-Key y no la duplica.
+func (uc *Guias) enviar(ctx context.Context, g *domain.Guia, pdf []byte, limite time.Duration) error {
+	ctxRegistro := ctx
+	if limite > 0 {
+		var cancelar context.CancelFunc
+		ctxRegistro, cancelar = context.WithTimeout(ctx, limite)
+		defer cancelar()
+	}
+	id, err := uc.externas.Registrar(ctxRegistro, *g, pdf)
 	var rechazo *ports.ErrGuiaRechazada
 	switch {
 	case err == nil:
@@ -76,7 +94,7 @@ func (uc *Guias) EnviarPendientes(ctx context.Context, limite int) (enviadas int
 	}
 	for i := range pendientes {
 		g := pendientes[i].Guia
-		if err := uc.enviar(ctx, &g, pendientes[i].PDF); err != nil {
+		if err := uc.enviar(ctx, &g, pendientes[i].PDF, 0); err != nil {
 			return enviadas, err
 		}
 		enviadas++

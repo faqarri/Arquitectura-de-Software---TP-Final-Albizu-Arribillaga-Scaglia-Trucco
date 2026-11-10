@@ -14,12 +14,12 @@ npm test         # unitarios y recorrido de la interfaz (Vitest + Testing Librar
 npm run build    # verifica tipos y genera dist/
 ```
 
-**Datos de demostración.** Mientras el gateway, Usuarios y Catálogo no estén, la aplicación usa una API en memoria (`src/api/falso/`) con los mismos formatos, status y `code` que los servicios: reservas de 15 minutos, agotada o retenida, máximo de 6 lugares, compras idempotentes, guías que pasan a moderación y se publican. Arriba de todo aparece la franja "Modo demostración".
+**Datos de demostración (opcional).** Por defecto la aplicación usa el gateway real. Con `VITE_DATOS_FALSOS=true` (en Docker, `FRONTEND_DATOS_FALSOS=true`) usa una API en memoria (`src/api/falso/`) con los mismos formatos, status y `code` que los servicios: reservas de 15 minutos, agotada o retenida, máximo de 6 lugares, compras idempotentes, guías que pasan a moderación y se publican. Arriba de todo aparece la franja "Modo demostración".
 
 - Cuentas: `ana@example.com` / `demo1234` (cliente que ya compró un viaje a Bariloche) y `admin@example.com` / `admin1234`.
 - **Simular fallas** (botón abajo a la izquierda): Catálogo caído, servicio de guías caído, compra que queda procesando y reservas de 1 minuto. Sirve para ensayar la jornada de fallas.
 
-**Contra el gateway real:** `VITE_DATOS_FALSOS=false`. En Docker es `FRONTEND_DATOS_FALSOS=false` en el `.env`. nginx deriva `/api` a `FRONTEND_GATEWAY_URL` (por defecto `http://gateway:8080`), sin buffering para el tiempo real y con hasta 12 MB por pedido para los PDF. En desarrollo, `VITE_GATEWAY_URL` indica a dónde va `/api` (por defecto `http://localhost:8080`).
+**Contra el gateway real (por defecto):** nginx deriva `/api` a `FRONTEND_GATEWAY_URL` (por defecto `http://gateway:8080`), sin buffering para el tiempo real y con hasta 12 MB por pedido para los PDF. En desarrollo, `VITE_GATEWAY_URL` indica a dónde va `/api` (por defecto `http://localhost:8080`).
 
 ## Pantallas
 

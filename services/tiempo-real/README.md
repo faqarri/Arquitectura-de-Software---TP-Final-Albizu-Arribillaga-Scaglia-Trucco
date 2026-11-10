@@ -23,13 +23,26 @@ Envía un *heartbeat* (comentario SSE) cada 20 s para que no se corte la conexi�
 
 **Garantías:** mejor esfuerzo. El cliente descarta eventos con `version` menor o igual a la última conocida y, al (re)conectar, consulta `GET /api/ofertas/{id}/disponibilidad` a Catálogo.
 
-**Estructura tentativa (Go):**
+**Estructura (Go):**
 
 ```
 cmd/tiempo-real/main.go
-internal/sse/        # handlers SSE, heartbeat, registro de conexiones
-internal/hub/        # suscripciones en memoria: oferta → conexiones, usuario → conexiones
-internal/consumer/   # consumidor RabbitMQ (cola exclusiva sobre el fanout)
+internal/sse/         # rutas SSE, latido, validación (hasta 50 ofertas; mis-retenciones exige X-Usuario-Id del gateway)
+internal/hub/         # suscripciones en memoria: oferta → conexiones, usuario → conexiones; buffer de 16 por conexión
+internal/consumidor/  # consumidor RabbitMQ (cola exclusiva sobre el fanout) y traducción de los eventos
 ```
 
-**Historial:** 2026-10-22: servicio nuevo, incorporado en la devolución de la Entrega 1.
+**Configuración:** `PUERTO_HTTP` (`8080`), `RABBITMQ_URL` (obligatoria), `OTEL_EXPORTER_OTLP_ENDPOINT` (opcional). En Compose el gateway lo encuentra en `TIEMPO_REAL_URL` (por defecto `http://tiempo-real:8080`).
+
+**Operativa:** `GET /health` y `GET /metrics`, con `tiempo_real_conexiones`, `tiempo_real_eventos_total{tipo,resultado}` y `tiempo_real_eventos_descartados_total`.
+
+**Probar a mano** (con el entorno levantado):
+
+```bash
+curl -N "http://localhost:8080/api/tiempo-real/ofertas?ids=<id de una oferta>"
+# en otra terminal, agregar esa oferta al carrito: llega "event: disponibilidad"
+```
+
+**Tests:** `go test ./...` (hub, traducción de eventos y streams SSE con `httptest`).
+
+**Historial:** 2026-10-22: servicio nuevo, incorporado en la devolución de la Entrega 1. 2026-11-10: implementación (ver Revisiones de [ADR-015](../../docs/adr/ADR-015-disponibilidad-en-tiempo-real.md)).

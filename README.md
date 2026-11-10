@@ -33,6 +33,8 @@ cp .env.example .env      # completar valores locales (no se versiona)
 docker compose up -d --build
 ```
 
+En el `.env` hay que completar como mínimo las contraseñas marcadas `cambiar`, `JWT_SECRET` (`openssl rand -hex 32`) y el **administrador inicial** (`USUARIOS_ADMIN_EMAIL` y `USUARIOS_ADMIN_PASSWORD`). Con el administrador definido, el servicio `semilla` carga al primer arranque un catálogo de demostración: 16 ofertas en 6 destinos (Bariloche, Mendoza, Salta, Iguazú, Ushuaia y Córdoba) y 2 packs ([infra/semilla/](infra/semilla/)); si ya está cargado, no hace nada. Después se entra a http://localhost:5173, se crea una cuenta de cliente y se puede buscar, reservar y comprar. Sin `ESTUDIARIO_URL` en el `.env`, las guías usan el mock del proveedor.
+
 > MySQL crea los esquemas y un usuario por servicio **solo la primera vez**, con el volumen vacío. Si ya habías levantado el entorno antes de esos cambios, ejecutá `docker compose down -v` y después `docker compose up -d` (borra los datos locales).
 
 Grafana requiere que `GRAFANA_DB_PASSWORD` esté definida en `.env`; se usa para la cuenta MySQL de solo lectura que consulta `comprobantes.app_logs`. No reutilices una contraseña real de otra cuenta.
@@ -44,6 +46,7 @@ Componentes:
 | Componente | URL local |
 |---|---|
 | Frontend (React) | http://localhost:5173 |
+| API Gateway (entrada única de la API: `/api/...`) | http://localhost:8080 |
 | Catálogo, instancias 1 y 2 (ofertas, packs, cupos, búsqueda) | http://localhost:8083 · http://localhost:8084 (salud: `/health`) |
 | Reservas (carrito, compras, guías) | http://localhost:8082 |
 | Comprobantes (API pública v1, capacidad publicada) | http://localhost:8081 |
@@ -55,18 +58,18 @@ Componentes:
 | OpenSearch · MongoDB · Redis · MySQL | `:9200` · `:27017` · `:6379` · `:3306` (o `MYSQL_PUERTO`) |
 | Mocks (Prism) de Comprobantes, de la API interna de Catálogo y de Estudiario | http://localhost:4010 · :4020 · :4030 |
 
-> **Estado (10/11/2026):** Catálogo (en capas, dos instancias, MongoDB + MySQL, caché Redis, búsqueda con OpenSearch, guías de Estudiario), Reservas (hexagonal: carrito, compra con recuperación, `CompraConfirmada`, guías) y Comprobantes (hexagonal) funcionan de punta a punta: una compra confirmada termina en la factura por correo. El frontend tiene todas las pantallas y por ahora usa datos de demostración (`FRONTEND_DATOS_FALSOS=true`). **Falta integrar en `main` el API Gateway y el servicio Usuarios**; hasta entonces, los servicios se prueban directo con los headers `X-Usuario-*` que pondría el gateway (ver el README de cada servicio). Tiempo Real (bonus) no está implementado. Decisiones: [índice de ADRs](docs/adr/README.md). Limitaciones: [ARCHITECTURE.md §9](docs/ARCHITECTURE.md#9-limitaciones-conocidas-y-deuda-técnica).
+> **Estado (10/11/2026, cierre):** el sistema funciona de punta a punta a través del **API Gateway**: registro y login (Usuarios, JWT), búsqueda (OpenSearch), detalle con disponibilidad y guías de Estudiario (Catálogo, dos instancias balanceadas con caché Redis), carrito con retención de cupo, compra y factura por correo (Reservas y Comprobantes), y compartir guías. El frontend usa los servicios reales por defecto (`FRONTEND_DATOS_FALSOS=true` lo pasa al modo de demostración sin backend). La API de Comprobantes está desplegada en la nube ([Parte desplegada](#parte-desplegada)). Las caídas ensayadas están en [POSTMORTEM.md](docs/POSTMORTEM.md). El bonus **Tiempo Real** ([ADR-015](docs/adr/ADR-015-disponibilidad-en-tiempo-real.md)) está implementado: el detalle de una oferta se actualiza solo cuando cambian sus cupos y el carrito avisa cuando vence una reserva. Decisiones: [índice de ADRs](docs/adr/README.md). Limitaciones: [ARCHITECTURE.md §9](docs/ARCHITECTURE.md#9-limitaciones-conocidas-y-deuda-técnica).
 
 ### Observabilidad local
 
-Prometheus recolecta las métricas de Comprobantes, Reservas y las dos instancias de Catálogo desde `/metrics`. Grafana aprovisiona Prometheus y MySQL como fuentes de datos y el dashboard **Agencia de Viajes - Observabilidad**, con tasa de solicitudes, latencia p95, respuestas 5xx y los logs recientes (`app_logs` de cada servicio, con `correlacion_id` y `trace_id`). Las trazas de una compra se siguen en Jaeger a través de Reservas, RabbitMQ y Comprobantes.
+Prometheus recolecta las métricas de Comprobantes, Reservas, las dos instancias de Catálogo, Usuarios, el Gateway y Tiempo Real desde `/metrics`. Hay dos alertas: tasa de 5xx mayor al 5 % y una instancia de Catálogo fuera del pool. Grafana aprovisiona Prometheus y MySQL como fuentes de datos y el dashboard **Agencia de Viajes - Observabilidad**, con tasa de solicitudes, latencia p95, respuestas 5xx y los logs recientes (`app_logs` de cada servicio, con `correlacion_id` y `trace_id`). Las trazas de una compra se siguen en Jaeger a través de Reservas, RabbitMQ y Comprobantes.
 
 ### Código y tests
 
 El backend está en Go. Cada servicio es un módulo propio (`services/<servicio>/go.mod`) y `pkg/` es un módulo compartido (observabilidad, mensajería con outbox y DLQ, y el adaptador de Estudiario). El archivo `go.work` de la raíz los une para el editor:
 
 ```bash
-cd services/catalogo && go test -short ./...   # unitarios, sin Docker (igual en reservas, comprobantes y pkg)
+cd services/catalogo && go test -short ./...   # unitarios, sin Docker (igual en reservas, comprobantes, usuarios, tiempo-real, gateway y pkg)
 cd services/catalogo && go test ./...          # + integración contra MySQL, MongoDB, RabbitMQ u OpenSearch reales (testcontainers)
 cd frontend && npm test
 ```

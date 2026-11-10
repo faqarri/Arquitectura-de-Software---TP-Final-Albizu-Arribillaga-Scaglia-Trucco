@@ -251,7 +251,7 @@ services:
       USUARIOS_URL: http://usuarios:8080
       RESERVAS_URL: http://reservas:8080
       CATALOGO_INSTANCIAS: ${GATEWAY_CATALOGO_INSTANCIAS:-http://catalogo-1:8080,http://catalogo-2:8080}
-      TIEMPO_REAL_URL: ${TIEMPO_REAL_URL:-}
+      TIEMPO_REAL_URL: ${TIEMPO_REAL_URL:-http://tiempo-real:8080}
       GATEWAY_RATE_LIMIT_POR_MINUTO: ${GATEWAY_RATE_LIMIT_POR_MINUTO:-120}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports: ["8080:8080"]
@@ -260,6 +260,22 @@ services:
       usuarios: { condition: service_healthy }
       reservas: { condition: service_healthy }
       jaeger: { condition: service_started }
+
+  # Carga una sola vez el catálogo de demostración (16 ofertas en 6 destinos y
+  # 2 packs) a través del gateway, con el administrador inicial del .env. Si ya
+  # está cargado, o si no hay administrador configurado, no hace nada.
+  semilla:
+    image: alpine:3.20
+    command: ["sh", "/semilla/cargar.sh"]
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      USUARIOS_ADMIN_EMAIL: ${USUARIOS_ADMIN_EMAIL:-}
+      USUARIOS_ADMIN_PASSWORD: ${USUARIOS_ADMIN_PASSWORD:-}
+    volumes:
+      - ./infra/semilla:/semilla:ro
+    restart: "no"
+    depends_on:
+      gateway: { condition: service_healthy }
 
   # Mock de la API interna de retenciones de Catálogo (docs/contracts/internos/).
   # Sirve para probar Reservas sin Catálogo (CATALOGO_URL=http://catalogo-mock:4010).
@@ -279,18 +295,31 @@ services:
     ports: ["4030:4010"]
 
   # Frontend (React + Vite) servido por nginx, que deriva /api al gateway.
-  # La búsqueda con OpenSearch aún está pendiente; los datos falsos mantienen disponible la demo del frontend.
+  # Usa los servicios reales. FRONTEND_DATOS_FALSOS=true lo pasa al modo de
+  # demostración sin backend (datos en memoria y panel para simular fallas).
   frontend:
     build:
       context: ./frontend
       args:
-        VITE_DATOS_FALSOS: ${FRONTEND_DATOS_FALSOS:-true}
+        VITE_DATOS_FALSOS: ${FRONTEND_DATOS_FALSOS:-false}
     environment:
       GATEWAY_URL: ${FRONTEND_GATEWAY_URL:-http://gateway:8080}
     ports: ["5173:80"]
 
-  # --- Servicios que se habilitan a medida que se implementan ---
-  # tiempo-real:  { build: ./services/tiempo-real, env_file: .env, depends_on: [rabbitmq] }  # sin estado, SSE vía gateway (ADR-015)
+  # Bonus (ADR-015): reenvía por SSE los cambios de disponibilidad y los
+  # vencimientos de retenciones. Sin estado; solo accesible por el gateway.
+  tiempo-real:
+    build:
+      context: .
+      dockerfile: services/tiempo-real/Dockerfile
+    environment:
+      PUERTO_HTTP: "8080"
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    restart: on-failure
+    depends_on:
+      rabbitmq: { condition: service_started }
+      jaeger: { condition: service_started }
 
 volumes:
   mysql-data:

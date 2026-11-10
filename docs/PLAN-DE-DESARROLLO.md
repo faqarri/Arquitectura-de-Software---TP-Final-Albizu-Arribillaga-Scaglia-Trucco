@@ -294,24 +294,25 @@ Arribillaga redacta `docs/POSTMORTEM.md`: impacto, línea de tiempo (con horas r
 
 | Enunciado | Dónde se ve | ✔ |
 |---|---|---|
-| 3+ microservicios y api gateway (§2.1) | Usuarios, Catálogo, Reservas, Comprobantes y Gateway en `docker-compose.yml` | ☐ |
-| Dos estilos de arquitectura (§2.1) | Hexagonal: Comprobantes y Reservas. En capas: Catálogo y Usuarios (ADR-002) | ☐ |
-| Frontend completo (§2.2) | `frontend/`, del login hasta la compra y las guías | ☐ |
+| 3+ microservicios y api gateway (§2.1) | Usuarios, Catálogo, Reservas, Comprobantes y Gateway en `docker-compose.yml` | ☒ |
+| Dos estilos de arquitectura (§2.1) | Hexagonal: Comprobantes y Reservas. En capas: Catálogo y Usuarios (ADR-002) | ☒ |
+| Frontend completo (§2.2) | `frontend/`, del login hasta la compra y las guías | ☒ |
 | Balanceo con 2+ instancias, detección de caídas y evidencia (§2.3) | Gateway + `catalogo-1`/`catalogo-2` + panel por instancia; [ensayo integrado](./ensayos/2026-11-10-balanceo-gateway.md) | ☒ |
-| Comunicación síncrona con timeout, reintentos y respuestas tardías (§2.5) | Reservas → Catálogo (ADR-005), Catálogo/Reservas → Estudiario (ADR-009) | ☐ |
-| Evento de dominio y mensajes fallidos (§2.5) | `CompraConfirmada` y `EnvioSolicitado` con DLQ | ☐ |
-| Búsqueda con paginación, filtros, orden y retraso definido (§2.6) | `GET /api/busqueda`, ADR-006 | ☐ |
-| Caché con métricas de impacto (§2.7) | Redis + panel de hit rate + medición de ADR-007 | ☐ |
-| Relacional + no relacional, y operación con garantías de consistencia (§2.8) | MySQL + MongoDB. Retenciones y confirmación (ADR-014). Idempotencia de Comprobantes | ☐ |
-| Mecanismo de protección y caída en POSTMORTEM (§2.9) | Circuit breaker, timeouts, reintentos, outbox y DLQ. `docs/POSTMORTEM.md` | ☐ |
-| Logs estructurados, métricas, trazas, tablero y alerta (§2.10) | Grafana, Jaeger y Prometheus | ☐ |
-| Tests unitarios, de integración contra dependencia real y de carga (§2.11) | `go test ./...` por servicio, testcontainers y `tests/carga/` | ☐ |
-| Repo público, rama principal, procedimiento único, secretos fuera (§2.12) | `main`, README, `.env.example` sin secretos reales | ☐ |
-| Capacidad propia desplegada con URL pública (§4.1 y §6) | `docs/contracts/` con la URL real | ☐ |
-| Capacidad del proveedor en el flujo principal, desde el microservicio (§4.1) | Guías en Catálogo y Reservas, nunca desde el frontend | ☐ |
-| Test de contrato del proveedor (§4.1, defensa) | `go test` en Reservas con kin-openapi + Prism | ☐ |
-| ADR D1 a D13 al día (§5) | `docs/adr/` | ☐ |
-| Limitaciones y deuda técnica (§6) | `docs/ARCHITECTURE.md` | ☐ |
+| Comunicación síncrona con timeout, reintentos y respuestas tardías (§2.5) | Reservas → Catálogo (ADR-005), Catálogo/Reservas → Estudiario (ADR-009) | ☒ |
+| Evento de dominio y mensajes fallidos (§2.5) | `CompraConfirmada` y `EnvioSolicitado` con DLQ | ☒ |
+| Búsqueda con paginación, filtros, orden y retraso definido (§2.6) | `GET /api/busqueda`, ADR-006 | ☒ |
+| Caché con métricas de impacto (§2.7) | Redis + panel de hit rate + medición de ADR-007 | ☒ |
+| Relacional + no relacional, y operación con garantías de consistencia (§2.8) | MySQL + MongoDB. Retenciones y confirmación (ADR-014). Idempotencia de Comprobantes | ☒ |
+| Mecanismo de protección y caída en POSTMORTEM (§2.9) | Circuit breaker, timeouts, reintentos, outbox y DLQ. `docs/POSTMORTEM.md` | ☒ |
+| Logs estructurados, métricas, trazas, tablero y alerta (§2.10) | Grafana, Jaeger y Prometheus | ☒ |
+| Tests unitarios, de integración contra dependencia real y de carga (§2.11) | `go test ./...` por servicio, testcontainers y `tests/carga/` | ☒ |
+| Repo público, rama principal, procedimiento único, secretos fuera (§2.12) | `main`, README, `.env.example` sin secretos reales | ☒ |
+| Capacidad propia desplegada con URL pública (§4.1 y §6) | `docs/contracts/` con la URL real | ☒ |
+| Capacidad del proveedor en el flujo principal, desde el microservicio (§4.1) | Guías en Catálogo y Reservas, nunca desde el frontend | ☒ |
+| Test de contrato del proveedor (§4.1, defensa) | `go test` en Reservas con kin-openapi + Prism | ☒ |
+| ADR D1 a D13 al día (§5) | `docs/adr/` | ☒ |
+| Limitaciones y deuda técnica (§6) | `docs/ARCHITECTURE.md` | ☒ |
+| Bonus: actualizaciones en tiempo real | `services/tiempo-real` (SSE por el gateway), ADR-015 | ☒ |
 
 ---
 
@@ -351,3 +352,4 @@ Cada uno defiende **todo** el sistema. El martes a la noche, o el día que quede
 | 2026-11-10 | Integración de Catálogo en la rama Trucco: `catalogo-1` y `catalogo-2` quedan en Compose, Gateway recibe sus URLs, Prometheus scrapea las instancias y Grafana combina sus métricas con las del pool. El frontend sigue en modo demostración hasta que estén listas las rutas de búsqueda y el indexador. Falta ensayar la caída y recuperación de una instancia y verificar las alertas en vivo. | Continuar la parte de Trucco sobre la integración entregada por Albizu y dejar explícitos los pasos de validación restantes. |
 | 2026-11-10 | Ensayo integrado de Trucco: seis requests alternaron entre las dos instancias; al detener `catalogo-2`, el Gateway siguió respondiendo desde `catalogo-1`, la alerta se disparó y la instancia volvió saludable al reiniciarla. Se registra la evidencia en `docs/ensayos/2026-11-10-balanceo-gateway.md` y ADR-012 pasa a Aceptada. | Cerrar el criterio de balanceo con evidencia local reproducible. |
 | 2026-11-10 | Avance de Arribillaga. **Búsqueda (4.4 paso 3) terminada** dentro de Catálogo: indexador de `catalogo.indexacion`, `GET /api/busqueda` y `POST /internal/busqueda/reconstruccion`, con tests unitarios y de integración contra OpenSearch. Retraso medido: p95 1,1 s (ADR-006). **Pruebas de carga (paso 4) hechas:** `tests/carga/catalogo.js` y `compras.js`; caché antes y después (90 % de aciertos, p95 −32 %, cumple ADR-007), B1 (112 compras/s sin errores), B2 (50 de 50 cupos, sin sobreventa); límites, escalado y diagnóstico corregido del outbox en ADR-013. **Despliegue (paso 1) preparado:** `deploy/comprobantes/` (compose reducido + Caddy con HTTPS) y `docs/DESPLIEGUE.md`; **falta crear la VM** y reemplazar los `<COMPLETAR: URL pública>`. **Frontend (paso 2):** formatos de Catálogo confirmados contra el servicio real; falta conectarlo al gateway. **Cierre (paso 5):** README (se resolvió un conflicto de merge que había quedado commiteado), limitaciones de ARCHITECTURE.md y `docs/POSTMORTEM.md`, con dos incidentes reales; faltan las caídas de la jornada grupal (catalogo-2 y Estudiario). Además, Jaeger limitado a 20 000 trazas en memoria (sin límite agotó la memoria en la prueba de carga). **Pendiente para otros:** paneles y alertas de búsqueda (p95 del retraso, mensajes en `catalogo.indexacion.dlq`) en el tablero (Trucco); la ruta `GET /api/busqueda` en el gateway, balanceada entre las dos instancias (Trucco). | Pasos 4.4.1 a 4.4.5 del plan. |
+| 2026-11-10 | Cierre (hecho por Scaglia con ayuda, cubriendo pendientes de todo el grupo). **Despliegue:** API de Comprobantes en Azure (`https://68-211-124-251.sslip.io`), verificada de punta a punta y con la URL en contrato, guía y README. **Ensayos de caída con tiempos medidos** (POSTMORTEM #4 y #5, cerrados): se corrigieron dos fallas que veía el cliente, los `502` del gateway mientras una instancia de Catálogo caída seguía en el pool (ahora reintenta las lecturas en otra instancia) y el `502` al compartir una guía con Estudiario caído (ahora responde `POR_ENVIAR` en 8 s). **Alerta de 5xx** validada en vivo y ampliada a lo que ve el cliente en el gateway; ADR-011 pasa a Aceptada. **Frontend** contra los servicios reales por defecto y **catálogo de demostración** cargado por el servicio `semilla`. **Bonus Tiempo Real implementado** (servicio, gateway y frontend), verificado con los dos eventos. Arreglos menores: valor por defecto de las instancias de Catálogo en el gateway, tests de Usuarios dependientes de la fecha. Checklist del enunciado completo. | Dejar `main` listo para la evaluación. |

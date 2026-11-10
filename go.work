@@ -8,5 +8,6 @@ use (
 	./services/catalogo
 	./services/comprobantes
 	./services/reservas
+	./services/tiempo-real
 	./services/usuarios
 )

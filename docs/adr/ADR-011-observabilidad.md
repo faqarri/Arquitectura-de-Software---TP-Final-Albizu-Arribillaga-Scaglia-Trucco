@@ -1,6 +1,6 @@
 # ADR-011: Observabilidad
 
-- **Estado:** Propuesta (versión inicial para la Entrega 2)
+- **Estado:** Aceptada (2026-11-10: las dos alertas verificadas con caídas reales; ver [Revisiones](#revisiones))
 - **Fecha:** 2026-10-23
 - **Decisión de la cátedra:** D11
 
@@ -91,7 +91,8 @@ El dashboard y las alertas son una primera vista. La antigüedad del outbox, la 
 - (+) Comprobantes mantiene los logs JSON en stdout y los persiste de forma asíncrona en `app_logs`; la cola acotada evita que un fallo de persistencia de logs bloquee las solicitudes de negocio.
 - (+) Grafana usa una cuenta MySQL con permiso `SELECT` únicamente sobre `comprobantes.app_logs`.
 - (+) El dashboard inicial de Grafana unifica la tasa y latencia de solicitudes HTTP con los logs recientes de Comprobantes.
-- (−) Faltan métricas de negocio, colas y outbox; las reglas de alerta están implementadas pero falta demostrar su disparo con tráfico y con la caída real de una réplica.
+- (+) Las dos alertas se verificaron con caídas reales y tráfico: instancia fuera del pool ([POSTMORTEM #4](../POSTMORTEM.md#4-caída-de-una-instancia-de-catálogo)) y tasa de 5xx (ver Revisiones, 2026-11-10).
+- (−) Faltan métricas de negocio, colas y outbox (por ejemplo, mensajes en las DLQ).
 - (−) La propagación del publicador debe conservarse al integrar cambios posteriores de RabbitMQ; hoy se persisten y reenvían los headers, pero falta un span específico de productor.
 - (−) Los objetivos iniciales se deben validar con pruebas de carga y datos observados antes de tratarlos como SLO comprometidos.
 
@@ -99,7 +100,7 @@ El dashboard y las alertas son una primera vista. La antigüedad del outbox, la 
 
 **Implementado:** logs JSON con `slog`, correlación HTTP, `trace_id`/`span_id`, persistencia asíncrona de logs de Comprobantes en MySQL, usuario de consulta de solo lectura para Grafana, SDK y propagación W3C, spans HTTP y GORM, span de consumidor, exportación OTLP/HTTP a Jaeger, middleware de métricas HTTP en Comprobantes/Reservas/Usuarios/Gateway, scraping de Prometheus cada 5 segundos, reglas Prometheus consultables en Grafana y dashboard aprovisionado con métricas, logs, salud por instancia y targets.
 
-**Pendiente:** validar en vivo la alerta global de tasa 5xx; métricas de negocio/colas/outbox en los servicios respectivos; span propio del publicador de outbox. La alerta de instancia fuera del pool ya se verificó con la caída real de `catalogo-2`.
+**Pendiente (mejoras, fuera del alcance de la entrega):** métricas de negocio/colas/outbox en los servicios respectivos; span propio del publicador de outbox. Las dos alertas ya se verificaron en vivo.
 
 ## Revisiones
 
@@ -108,3 +109,4 @@ El dashboard y las alertas son una primera vista. La antigüedad del outbox, la 
 - **2026-11-09:** El panel de logs pasa a mostrar los de Comprobantes, Reservas y Catálogo (unión de las tres tablas `app_logs`); el usuario `grafana` sigue limitado a `SELECT` sobre esas tres tablas, que ahora crea `01-esquemas.sql` para poder dar el permiso en el primer arranque. Se agregan paneles de Catálogo: solicitudes por instancia y estado de cada instancia (`up`), para ver el balanceo (ADR-012), y tasa de aciertos, latencia p95 del detalle por origen y errores y corte de Redis, para la caché (ADR-007). Prometheus mide `catalogo-1` y `catalogo-2`. Quien tenga el volumen de MySQL de antes debe crear el usuario o los permisos a mano, o recrear el volumen con `docker compose down -v`. Las alertas siguen pendientes.
 - **2026-11-09:** Se amplía el scraping a Usuarios y Gateway; se agregan en Grafana los paneles de tráfico upstream, salud de Catálogo, disponibilidad de targets y alertas activas. Se aprovisionan reglas para 5xx > 5 % durante 1 minuto y para instancias de Catálogo fuera del pool durante 1 minuto; `promtool check rules` y `promtool test rules` validan sintaxis y disparo con series sintéticas. La verificación con una caída real y el resto de métricas de negocio quedan pendientes de la integración de Catálogo y de la prueba de carga.
 - **2026-11-10:** Se integran las dos instancias reales de Catálogo al Compose, al scraping y al pool round robin del Gateway. El dashboard unifica logs de Comprobantes, Reservas y Catálogo, salud y tráfico del pool, targets, alertas y métricas de caché. El ensayo real confirmó que la alerta de instancia fuera del pool dispara y que la réplica se recupera; falta validar en vivo la alerta global de tasa 5xx.
+- **2026-11-10:** Al validar en vivo la alerta de 5xx se vio que solo miraba `http_requests_total` de los servicios: si un servicio entero se cae, deja de exportar métricas y los `502`/`503` que ven los clientes (los responde el gateway) no entraban en la cuenta. La regla `TasaErroresHTTPAlta` pasa a dispararse si **cualquiera** de las dos tasas supera el 5 %: la del gateway (`gateway_solicitudes_total`, lo que ven los clientes) o la de los servicios (cubre Comprobantes, que el otro grupo usa sin gateway). Verificación con tráfico de una lectura cada 0,5 s y las dos instancias de Catálogo detenidas a las 17:27:43: `pending` a las 17:28:19, `firing` a las 17:29:19 (`for: 1m`), instancias iniciadas a las 17:29:19 y alerta resuelta a las 17:30:50. Con esto el ADR pasa a Aceptada.

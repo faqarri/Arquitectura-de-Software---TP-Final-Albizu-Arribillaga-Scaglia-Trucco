@@ -210,7 +210,7 @@ sequenceDiagram
     participant CAT as Catálogo
     participant R as Reservas
 
-    C->>GW: GET /api/tiempo-real/ofertas?ids=a,b (EventSource)
+    C->>GW: GET /api/tiempo-real/ofertas?ids=a,b (stream SSE leído con fetch)
     GW->>TR: conexión SSE (sin buffering, timeout largo)
     C->>GW: GET /api/ofertas/a/disponibilidad
     GW->>CAT: consulta estado actual
@@ -259,7 +259,7 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 
 - **Local:** todo el sistema se levanta con `docker compose up`.
 - **Nube:** el servicio de Comprobantes (capacidad publicada) se despliega con URL pública en una VM con Docker Compose y Caddy (HTTPS). Procedimiento en [DESPLIEGUE.md](DESPLIEGUE.md).
-- **Balanceo de carga:** Catálogo corre en dos instancias detrás del Gateway. El estado vive en las bases: los bloqueos son de fila en MySQL y el proceso de vencimiento usa `SKIP LOCKED`. El round robin, la caída, la alerta y la recuperación se verificaron localmente (ADR-012 y [ensayo](ensayos/2026-11-10-balanceo-gateway.md)). Tiempo Real también puede escalar horizontalmente sin coordinación cuando se implemente.
+- **Balanceo de carga:** Catálogo corre en dos instancias detrás del Gateway. El estado vive en las bases: los bloqueos son de fila en MySQL y el proceso de vencimiento usa `SKIP LOCKED`. El round robin, la caída, la alerta y la recuperación se verificaron localmente (ADR-012 y [ensayo](ensayos/2026-11-10-balanceo-gateway.md)). Tiempo Real también escala horizontalmente sin coordinación: cada instancia recibe todos los eventos por su cola exclusiva.
 
 ## 8. Pendientes de diseño
 
@@ -295,7 +295,7 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 - **El corte de la caché traslada el pico a MongoDB.** Si Redis falla 5 veces seguidas, Catálogo deja de consultarlo 30 s y todas las lecturas van a MongoDB de golpe. Con la máquina sin memoria, eso agotó el pool de conexiones de MongoDB (0,02 % de `503`) ([ADR-007](adr/ADR-007-cache.md)).
 - **Trazas en memoria.** Jaeger guarda las trazas en memoria, limitado a 20 000. Sin el límite, una prueba de carga lo llevó a 5,5 GB y dejó sin memoria al resto ([POSTMORTEM](POSTMORTEM.md)).
 - **Despliegue en una sola máquina virtual** ([DESPLIEGUE.md](DESPLIEGUE.md)). Es un único punto de falla, y las copias de seguridad y las actualizaciones de la capacidad publicada las operamos nosotros. Prometheus, Grafana y Jaeger corren solo en el entorno local.
-- **Recortes de alcance** (plan de desarrollo, §3.2): los packs son mínimos (descuento fijo, se agregan todo o nada). Tiempo Real (bonus, [ADR-015](adr/ADR-015-disponibilidad-en-tiempo-real.md)) no está en `main` al 2026-11-10: la disponibilidad del detalle se consulta cada 15 s. B3 (vencimiento masivo de retenciones) no se midió.
+- **Recortes de alcance** (plan de desarrollo, §3.2): los packs son mínimos (descuento fijo, se agregan todo o nada). Tiempo Real (bonus, [ADR-015](adr/ADR-015-disponibilidad-en-tiempo-real.md)) está implementado; la consulta de la disponibilidad cada 15 s queda de respaldo en el detalle por si el servicio no responde. B3 (vencimiento masivo de retenciones) no se midió.
 
 **Resuelto:** el arranque en frío de Comprobantes con el volumen de MySQL vacío, con healthcheck de MySQL por TCP y `restart: on-failure` (2026-11-07). Comprobantes no reintenta la conexión inicial en el código: si falla, Docker lo reinicia (Catálogo y Reservas sí reintentan).
 

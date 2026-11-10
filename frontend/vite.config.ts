@@ -8,13 +8,15 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       port: 5173,
-      // En desarrollo, /api va al gateway (solo se usa con VITE_DATOS_FALSOS=false).
+      // En desarrollo, /api va al gateway (salvo con VITE_DATOS_FALSOS=true).
       proxy: { '/api': env.VITE_GATEWAY_URL || 'http://localhost:8080' },
     },
     test: {
       environment: 'jsdom',
       globals: true,
       setupFiles: './src/test/setup.ts',
+      // Los tests de pantallas recorren la API en memoria, sin backend.
+      env: { VITE_DATOS_FALSOS: 'true' },
     },
   }
 })

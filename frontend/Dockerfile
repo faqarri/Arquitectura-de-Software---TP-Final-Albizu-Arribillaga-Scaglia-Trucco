@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-ARG VITE_DATOS_FALSOS=true
+ARG VITE_DATOS_FALSOS=false
 ENV VITE_DATOS_FALSOS=$VITE_DATOS_FALSOS
 RUN npm run build
 

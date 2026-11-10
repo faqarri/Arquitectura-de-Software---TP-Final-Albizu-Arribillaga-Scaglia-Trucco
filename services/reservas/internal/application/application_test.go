@@ -305,6 +305,24 @@ func TestConEstudiarioCaidoLaGuiaQuedaPorEnviarYSeEnviaDespues(t *testing.T) {
 	}
 }
 
+func TestCompartirNoEsperaMasDelLimiteSiEstudiarioNoResponde(t *testing.T) {
+	e := nuevoEntorno()
+	e.comprarBariloche(t)
+	e.externas.colgado = true
+	e.guias.esperaEnvioInmediato = 50 * time.Millisecond
+	inicio := time.Now()
+	g, err := e.guias.Compartir(ctx, "u1", solicitudGuia("Bariloche"))
+	if err != nil || g.Estado != domain.GuiaPorEnviar {
+		t.Fatalf("g=%+v err=%v", g, err)
+	}
+	if d := time.Since(inicio); d > time.Second {
+		t.Errorf("Compartir tardó %v: debía responder al vencer la espera", d)
+	}
+	if EsperaEnvioInmediato >= 15*time.Second {
+		t.Error("la espera tiene que quedar por debajo del timeout del gateway (15 s)")
+	}
+}
+
 func TestGuiaRechazadaPorElProveedor(t *testing.T) {
 	e := nuevoEntorno()
 	e.comprarBariloche(t)

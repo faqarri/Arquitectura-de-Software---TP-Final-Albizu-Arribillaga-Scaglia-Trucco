@@ -83,6 +83,12 @@ func nuevoProxy(servicio, direccion string, log *slog.Logger) (*httputil.Reverse
 	proxy := httputil.NewSingleHostReverseProxy(objetivo)
 	proxy.Transport = otelTransport()
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		// El pool de Catálogo puede reintentar en otra instancia: entonces solo
+		// anota la falla y no responde (ver poolCatalogo.ServeHTTP).
+		if intento, ok := r.Context().Value(claveIntento{}).(*resultadoIntento); ok {
+			intento.err = err
+			return
+		}
 		log.ErrorContext(r.Context(), "falló la solicitud al servicio", "servicio", servicio, "error", err)
 		metricasGateway.WithLabelValues(servicio, rutaMetrica(r), "502").Inc()
 		responderProblemaHTTP(w, http.StatusBadGateway, "servicio-no-disponible", "Servicio no disponible",
@@ -108,23 +114,61 @@ func otelTransport() http.RoundTripper {
 	})
 }
 
+// claveIntento marca en el contexto una solicitud que el pool puede repetir en
+// otra instancia; resultadoIntento recibe el error de transporte, si lo hubo.
+type claveIntento struct{}
+
+type resultadoIntento struct{ err error }
+
+// ServeHTTP elige una instancia sana por round robin. Una lectura (GET o HEAD)
+// que no llega a la instancia (conexión rechazada, timeout) se repite una vez en
+// otra instancia sana, y la falla cuenta para retirarla del pool sin esperar a
+// los chequeos de salud (detección pasiva). Las escrituras no se repiten: el
+// error de transporte no dice si la instancia llegó a aplicar el cambio.
 func (p *poolCatalogo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	seleccionada := p.seleccionar()
+	lectura := r.Method == http.MethodGet || r.Method == http.MethodHead
+	var descartada *instanciaCatalogo
+	if lectura {
+		seleccionada := p.seleccionar(nil)
+		if seleccionada == nil {
+			p.responderSinInstancias(w, r)
+			return
+		}
+		intento := &resultadoIntento{}
+		seleccionada.proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claveIntento{}, intento)))
+		if intento.err == nil {
+			return
+		}
+		if r.Context().Err() != nil {
+			return // el cliente se fue: no hay a quién responder
+		}
+		p.log.WarnContext(r.Context(), "la instancia de Catálogo no respondió; se reintenta en otra",
+			"instancia", seleccionada.nombre, "error", intento.err)
+		p.registrarResultado(seleccionada, false, intento.err)
+		descartada = seleccionada
+	}
+	seleccionada := p.seleccionar(descartada)
 	if seleccionada == nil {
-		responderProblemaHTTP(w, http.StatusServiceUnavailable, "catalogo-no-disponible", "Catálogo no disponible",
-			"No hay instancias de Catálogo saludables.")
-		metricasGateway.WithLabelValues("ninguna", rutaMetrica(r), "503").Inc()
+		p.responderSinInstancias(w, r)
 		return
 	}
 	seleccionada.proxy.ServeHTTP(w, r)
 }
 
-func (p *poolCatalogo) seleccionar() *instanciaCatalogo {
+func (p *poolCatalogo) responderSinInstancias(w http.ResponseWriter, r *http.Request) {
+	responderProblemaHTTP(w, http.StatusServiceUnavailable, "catalogo-no-disponible", "Catálogo no disponible",
+		"No hay instancias de Catálogo saludables.")
+	metricasGateway.WithLabelValues("ninguna", rutaMetrica(r), "503").Inc()
+}
+
+// seleccionar devuelve la próxima instancia sana, salteando excluida (la que
+// acaba de fallar), o nil si no queda ninguna.
+func (p *poolCatalogo) seleccionar(excluida *instanciaCatalogo) *instanciaCatalogo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	sanas := make([]*instanciaCatalogo, 0, len(p.instancias))
 	for _, instancia := range p.instancias {
-		if instancia.sana {
+		if instancia.sana && instancia != excluida {
 			sanas = append(sanas, instancia)
 		}
 	}

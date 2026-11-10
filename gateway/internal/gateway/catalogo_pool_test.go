@@ -44,6 +44,60 @@ func TestPoolCatalogoDistribuyeRoundRobinEntreInstanciasSanas(t *testing.T) {
 	}
 }
 
+func TestPoolReintentaUnaLecturaEnOtraInstanciaSiLaElegidaEstaCaida(t *testing.T) {
+	var recibidas atomic.Int32
+	viva := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			recibidas.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer viva.Close()
+	caida := httptest.NewServer(http.NotFoundHandler())
+	caida.Close() // conexión rechazada, como un contenedor detenido
+
+	pool, err := nuevoPoolCatalogo([]string{caida.URL, viva.URL}, slog.New(slog.NewTextHandler(httptest.NewRecorder(), nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.cerrar()
+	for i := 0; i < 4; i++ {
+		w := httptest.NewRecorder()
+		pool.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/ofertas/x", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("lectura %d: status = %d; la caída no debía llegar al cliente", i, w.Code)
+		}
+	}
+	if recibidas.Load() != 4 {
+		t.Fatalf("la instancia viva atendió %d de 4", recibidas.Load())
+	}
+}
+
+func TestPoolNoReintentaUnaEscritura(t *testing.T) {
+	var recibidas atomic.Int32
+	viva := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			recibidas.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer viva.Close()
+	caida := httptest.NewServer(http.NotFoundHandler())
+	caida.Close()
+
+	pool, err := nuevoPoolCatalogo([]string{caida.URL, viva.URL}, slog.New(slog.NewTextHandler(httptest.NewRecorder(), nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.cerrar()
+	pool.siguiente.Store(0) // la primera elegida es la caída
+	w := httptest.NewRecorder()
+	pool.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/ofertas", nil))
+	if w.Code != http.StatusBadGateway || recibidas.Load() != 0 {
+		t.Fatalf("status = %d, recibidas = %d; un POST no se repite en otra instancia", w.Code, recibidas.Load())
+	}
+}
+
 func TestPoolRetiraTrasTresFallasYReincorporaTrasDosExitos(t *testing.T) {
 	instancia := &instanciaCatalogo{nombre: "catalogo-prueba", sana: true}
 	pool := &poolCatalogo{

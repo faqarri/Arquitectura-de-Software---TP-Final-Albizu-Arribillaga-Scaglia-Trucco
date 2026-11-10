@@ -73,3 +73,9 @@ Servicio **sin estado** (no tiene base de datos) que mantiene conexiones **Serve
 - (−) **Mejor esfuerzo:** un aviso puede perderse o llegar tarde, y se corrige al reconectar o al actuar. Ninguna regla de negocio depende de estos eventos.
 - (−) Cada instancia de Tiempo Real procesa todos los eventos, aunque no tenga clientes interesados. Es aceptable para el volumen esperado; si creciera, se podría pasar a un exchange `topic` por oferta.
 - (−) El vencimiento se notifica con el retraso del proceso de vencimiento de Catálogo (por defecto hasta 15 s) más la latencia del outbox.
+
+## Revisiones
+
+| Fecha | Cambio | Motivo |
+|---|---|---|
+| 2026-11-10 | **Implementado.** Servicio `services/tiempo-real` (Go, sin estado): cola exclusiva por instancia sobre el fanout `catalogo.disponibilidad`, suscripciones en memoria por oferta y por usuario, latido cada 20 s, hasta 50 ofertas por conexión y buffer de 16 eventos por conexión (si se llena, se descartan y se cuenta en `tiempo_real_eventos_descartados_total`). El gateway publica las dos rutas; `mis-retenciones` usa el usuario que pone el gateway tras validar el JWT. En el frontend, el detalle de la oferta reconsulta la disponibilidad con cada evento y al reconectar (la consulta cada 15 s queda de respaldo) y el carrito avisa cuando vence una reserva. El navegador lee el stream con `fetch` en lugar de `EventSource`. Verificado por el gateway: al agregar al carrito llega `disponibilidad` con los nuevos `libres` y `version`; con una retención de 1 minuto, `retencion-vencida` le llegó solo al titular 8 s después de vencer. | `EventSource` no permite mandar el header `Authorization`, que necesita `mis-retenciones`, y pasar el JWT en la URL lo dejaría en logs e historiales. Reconsultar el estado en vez de aplicar el evento mantiene a Catálogo como única fuente de verdad. |

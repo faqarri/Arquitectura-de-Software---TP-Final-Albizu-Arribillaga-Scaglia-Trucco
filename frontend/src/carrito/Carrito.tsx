@@ -2,7 +2,8 @@
 // Quitar un ítem se puede deshacer durante unos segundos: recién después se libera el cupo.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api } from '../api'
+import { api, datosFalsos } from '../api'
+import { useEventos } from '../api/tiempoReal'
 import { mensajeDeError } from '../api/errores'
 import type { Carrito, ItemCarrito, SolicitudAgregar } from '../api/tipos'
 import { useAvisos } from '../componentes/Avisos'
@@ -49,6 +50,21 @@ export function ProveedorCarrito({ children }: { children: ReactNode }) {
   useEffect(() => {
     void recargar()
   }, [recargar])
+
+  // Tiempo real (ADR-015): si vence una reserva del carrito, se avisa en el momento.
+  useEventos(
+    !datosFalsos && usuario?.rol === 'cliente' ? '/tiempo-real/mis-retenciones' : null,
+    (nombre) => {
+      if (nombre !== 'retencion-vencida') return
+      void recargar()
+      avisar({
+        tipo: 'info',
+        titulo: 'Venció una reserva de tu carrito',
+        detalle: 'Pasaron los 15 minutos y el lugar se liberó. Si todavía hay cupo, podés volver a agregarlo.',
+      })
+    },
+    () => void recargar(),
+  )
 
   const agregar = useCallback(
     async (s: SolicitudAgregar, clave: string) => {

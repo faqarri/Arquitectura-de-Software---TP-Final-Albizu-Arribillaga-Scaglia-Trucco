@@ -2,8 +2,17 @@ groups:
   - name: agencia-observabilidad
     interval: 15s
     rules:
+      # Dos miradas: lo que ven los clientes en el gateway (incluye los 502/503
+      # cuando un servicio entero está caído y no exporta métricas) y lo que
+      # responden los servicios (Comprobantes, que el otro grupo usa sin gateway).
       - alert: TasaErroresHTTPAlta
         expr: |
+          (
+            sum(rate(gateway_solicitudes_total{estado=~"5.."}[1m]))
+            /
+            clamp_min(sum(rate(gateway_solicitudes_total[1m])), 0.000001)
+          ) > 0.05
+          or
           (
             sum(rate(http_requests_total{status_code=~"5.."}[1m]))
             /
