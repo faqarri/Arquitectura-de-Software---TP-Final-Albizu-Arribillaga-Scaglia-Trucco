@@ -85,7 +85,7 @@ Desafío elegido: **actualizaciones de información en tiempo real** ([ADR-015](
 
 La capacidad publicada (API de Comprobantes) se despliega en una VM en la nube con HTTPS: procedimiento en [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md), archivos en [`deploy/comprobantes/`](deploy/comprobantes/).
 
-- URL pública: `<COMPLETAR: https://…>`
+- URL pública: https://68-211-124-251.sslip.io
 - Contrato y guía para el grupo consumidor: [docs/contracts/](docs/contracts/README.md)
 
 ## Documentación

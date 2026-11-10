@@ -4,7 +4,7 @@
 
 | Versión | Estado | Contrato | URL |
 |---|---|---|---|
-| 1.1.0 | **Vigente** (implementada) | [comprobantes/v1/openapi.yaml](comprobantes/v1/openapi.yaml) | Producción: `<COMPLETAR: URL pública>/v1` · Mock: `http://localhost:4010/v1` |
+| 1.1.0 | **Vigente** (implementada) | [comprobantes/v1/openapi.yaml](comprobantes/v1/openapi.yaml) | Producción: `https://68-211-124-251.sslip.io/v1` · Mock: `http://localhost:4010/v1` |
 
 **¿Vas a integrar la API en tu proyecto?** Seguí la [guía de integración](comprobantes/v1/GUIA-INTEGRACION.md), que explica paso a paso cómo obtener la API Key y dónde ubicarla.
 

@@ -12,14 +12,14 @@ Contrato formal: [openapi.yaml](openapi.yaml) (versión 1.1.0). Resumen de regla
 
 | Dato | Valor | Quién lo da | Dónde lo ubicás en tu proyecto |
 |---|---|---|---|
-| URL base | `<COMPLETAR: URL pública de la API>` | Nosotros (la publicamos acá y en el [README de contratos](../../README.md)) | Variable de entorno `COMPROBANTES_URL` |
+| URL base | `https://68-211-124-251.sslip.io` | Nosotros (la publicamos acá y en el [README de contratos](../../README.md)) | Variable de entorno `COMPROBANTES_URL` |
 | API Key | Empieza con `cmp_` | **Ustedes la generan** (paso 1) y les llega por correo | Variable de entorno `COMPROBANTES_API_KEY`, en su `.env` (nunca en el repositorio) |
 | Nombre de grupo | El que elijan, por ejemplo `grupo-7` | Ustedes | Solo se usa al pedir la API Key |
 | Email del grupo | Un email al que tengan acceso | Ustedes | Solo se usa al pedir la API Key; ahí les llega |
 
 En cada solicitud la API Key viaja en el header **`X-API-Key`**.
 
-Mientras la URL pública no esté publicada, pueden desarrollar contra el **mock** (paso 6).
+Para desarrollar sin depender de nuestra disponibilidad, pueden usar el **mock** (paso 6).
 
 ---
 
@@ -28,7 +28,7 @@ Mientras la URL pública no esté publicada, pueden desarrollar contra el **mock
 Hacen **una sola vez** un `POST /v1/api-keys`, sin API Key, con el nombre de su grupo y su email:
 
 ```bash
-curl -X POST <COMPLETAR: URL pública de la API>/v1/api-keys \
+curl -X POST https://68-211-124-251.sslip.io/v1/api-keys \
   -H "Content-Type: application/json" \
   -d '{ "grupo": "grupo-7", "email": "contacto@grupo7.example" }'
 ```
@@ -81,7 +81,7 @@ La API Key es un secreto: **no la suban al repositorio**.
 1. En el `.env` de su proyecto (que tiene que estar en `.gitignore`), agreguen:
    ```bash
    # API de Comprobantes (grupo Agencia de Viajes)
-   COMPROBANTES_URL=<COMPLETAR: URL pública de la API>
+   COMPROBANTES_URL=https://68-211-124-251.sslip.io
    COMPROBANTES_API_KEY=<pegar acá la clave que llegó por correo>
    ```
 2. En su `.env.example` (que sí se versiona), dejen el lugar vacío para que cada integrante complete el suyo:
@@ -282,4 +282,4 @@ Queda en `http://localhost:4010`. Usen `COMPROBANTES_URL=http://localhost:4010` 
 
 ## Contacto
 
-Ante dudas o problemas: `<COMPLETAR: email o canal de contacto del grupo>`.
+Ante dudas o problemas: algoritmostrabajojeje@gmail.com.

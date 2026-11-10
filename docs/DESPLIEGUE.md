@@ -4,8 +4,8 @@ La capacidad propia (API de Emisión de Comprobantes, [ADR-008](adr/ADR-008-cont
 
 | Dato | Valor |
 |---|---|
-| URL pública | `<COMPLETAR: https://…>` |
-| Proveedor y VM | `<COMPLETAR: proveedor, región, tamaño>` |
+| URL pública | https://68-211-124-251.sslip.io |
+| Proveedor y VM | Azure for Students, Chile Central, Standard B2als v2 (2 vCPU, 4 GB), Ubuntu 24.04. Desplegado el 2026-11-10 |
 | Responsable | Arribillaga |
 | Archivos | [`deploy/comprobantes/`](../deploy/comprobantes/) |
 
@@ -115,9 +115,11 @@ Si `POST /v1/api-keys` responde `503`, casi siempre es el correo: la clave se en
 
 Probado en local el 2026-11-10 con `DOMINIO=localhost` (Caddy usa un certificado propio para `localhost`): los cuatro contenedores sanos, `/health` por HTTPS, `/metrics` en `404`, HTTP redirige a HTTPS (`308`) y `/v1` sin clave en `401`.
 
+Verificado en la nube el 2026-11-10 desde fuera de la VM: `/health` responde por HTTPS con certificado de Let's Encrypt, HTTP redirige a HTTPS (`308`), `/metrics` en `404`, el puerto 8080 no responde desde afuera, `POST /v1/api-keys` en `202` con el correo recibido, `POST /v1/comprobantes` en `201` (reintento con la misma `Idempotency-Key` en `200`) y el envío terminó `ENVIADO`.
+
 ## 5. Publicar la URL
 
-Reemplazar `<COMPLETAR: URL pública…>` por `https://<DOMINIO>` en:
+Al cambiar de VM o de dominio, actualizar la URL `https://<DOMINIO>` en:
 
 - [`docs/contracts/comprobantes/v1/openapi.yaml`](contracts/comprobantes/v1/openapi.yaml) (`servers`)
 - [`docs/contracts/README.md`](contracts/README.md)
