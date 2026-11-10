@@ -38,6 +38,8 @@ CREATE USER IF NOT EXISTS 'grafana'@'%' IDENTIFIED BY '$clave_sql';
 ALTER USER 'grafana'@'%' IDENTIFIED BY '$clave_sql';
 REVOKE ALL PRIVILEGES, GRANT OPTION FROM 'grafana'@'%';
 GRANT SELECT ON \`comprobantes\`.\`app_logs\` TO 'grafana'@'%';
+GRANT SELECT ON \`reservas\`.\`app_logs\` TO 'grafana'@'%';
+GRANT SELECT ON \`catalogo\`.\`app_logs\` TO 'grafana'@'%';
 SQL
 }
 

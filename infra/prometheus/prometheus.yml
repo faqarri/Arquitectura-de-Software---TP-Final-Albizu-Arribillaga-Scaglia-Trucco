@@ -7,3 +7,16 @@ scrape_configs:
     static_configs:
       - targets:
           - comprobantes:8080
+  - job_name: reservas
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - reservas:8080
+  # Una serie por instancia (label instance): muestra cómo se reparten las
+  # solicitudes y cuál está caída (ADR-012).
+  - job_name: catalogo
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - catalogo-1:8080
+          - catalogo-2:8080

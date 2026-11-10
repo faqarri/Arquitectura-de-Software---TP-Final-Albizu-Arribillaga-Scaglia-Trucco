@@ -20,3 +20,9 @@ CREATE TABLE IF NOT EXISTS comprobantes.app_logs (
     INDEX idx_app_logs_correlacion (correlacion_id),
     INDEX idx_app_logs_trace (trace_id)
 ) ENGINE=InnoDB;
+
+-- La misma tabla de logs en reservas y catalogo (cada servicio la crea también al
+-- arrancar; con IF NOT EXISTS no choca). Se crean acá para que 02-usuarios.sh
+-- pueda darle a Grafana permiso de lectura sobre las tres.
+CREATE TABLE IF NOT EXISTS reservas.app_logs LIKE comprobantes.app_logs;
+CREATE TABLE IF NOT EXISTS catalogo.app_logs LIKE comprobantes.app_logs;

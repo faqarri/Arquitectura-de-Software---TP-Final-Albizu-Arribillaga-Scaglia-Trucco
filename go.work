@@ -4,5 +4,7 @@ go 1.26.0
 // es un módulo independiente; agregá acá cada servicio nuevo.
 use (
 	./pkg
+	./services/catalogo
 	./services/comprobantes
+	./services/reservas
 )

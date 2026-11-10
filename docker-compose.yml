@@ -1,6 +1,38 @@
 # Procedimiento único de puesta en marcha: `cp .env.example .env && docker compose up -d --build`
 # Infraestructura, mock del contrato y los servicios ya implementados.
 
+# Configuración común de las instancias de Catálogo (ADR-012: misma imagen, distinto INSTANCIA_ID).
+x-catalogo: &catalogo
+  build:
+    context: .
+    dockerfile: services/catalogo/Dockerfile
+  environment: &catalogo-env
+    GIN_MODE: release
+    PUERTO_HTTP: "8080"
+    DB_HOST: mysql
+    DB_PUERTO: "3306"
+    DB_USUARIO: catalogo
+    DB_PASSWORD: ${CATALOGO_DB_PASSWORD}
+    DB_NOMBRE: catalogo
+    MONGO_URL: mongodb://mongo:27017
+    RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+    REDIS_URL: redis://redis:6379/0
+    # false para medir sin caché (comparación antes/después de ADR-007).
+    CACHE_HABILITADA: ${CACHE_HABILITADA:-true}
+    RETENCION_MINUTOS: ${RETENCION_MINUTOS:-15}
+    RETENCION_MAX_CUPOS_POR_OFERTA: ${RETENCION_MAX_CUPOS_POR_OFERTA:-6}
+    RETENCION_BARRIDO_SEGUNDOS: ${RETENCION_BARRIDO_SEGUNDOS:-15}
+    ESTUDIARIO_URL: ${ESTUDIARIO_URL:-http://estudiario-mock:4010}
+    ESTUDIARIO_API_KEY: ${ESTUDIARIO_API_KEY:-clave-para-el-mock}
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  restart: on-failure
+  depends_on:
+    mysql: { condition: service_healthy }
+    mongo: { condition: service_started }
+    rabbitmq: { condition: service_started }
+    redis: { condition: service_started }
+    jaeger: { condition: service_started }
+
 services:
   mysql:
     image: mysql:8.4
@@ -18,9 +50,13 @@ services:
       - mysql-data:/var/lib/mysql
       - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      # Por TCP (127.0.0.1), no por socket: durante la inicialización MySQL corre un
+      # servidor temporal sin red que respondía al ping por socket y hacía arrancar a
+      # los servicios antes de tiempo (hallazgo del ensayo en ADR-010).
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
       interval: 10s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   mongo:
     image: mongo:7
@@ -34,6 +70,12 @@ services:
       DISABLE_SECURITY_PLUGIN: "true"
       OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
     ports: ["9200:9200"]
+
+  # Caché del detalle de ofertas (ADR-007), compartida por las instancias de Catálogo.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    ports: ["6379:6379"]
 
   rabbitmq:
     image: rabbitmq:3.13-management
@@ -110,19 +152,96 @@ services:
       HABILITAR_ENDPOINT_ERROR_PRUEBA: ${HABILITAR_ENDPOINT_ERROR_PRUEBA:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     ports: ["8081:8080"]
+    restart: on-failure
     depends_on:
       mysql: { condition: service_healthy }
       rabbitmq: { condition: service_started }
       mailpit: { condition: service_started }
       jaeger: { condition: service_started }
 
+  reservas:
+    build:
+      context: .
+      dockerfile: services/reservas/Dockerfile
+    environment:
+      GIN_MODE: release
+      PUERTO_HTTP: "8080"
+      DB_HOST: mysql
+      DB_PUERTO: "3306"
+      DB_USUARIO: reservas
+      DB_PASSWORD: ${RESERVAS_DB_PASSWORD}
+      DB_NOMBRE: reservas
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      # API interna de Catálogo. "catalogo" es el alias de red que comparten las dos
+      # instancias. Para probar contra el mock: CATALOGO_URL=http://catalogo-mock:4010
+      CATALOGO_URL: ${CATALOGO_URL:-http://catalogo:8080}
+      # Estudiario (Grupo 2): sin URL pública configurada, el mock de su contrato.
+      ESTUDIARIO_URL: ${ESTUDIARIO_URL:-http://estudiario-mock:4010}
+      # El mock acepta cualquier clave; para el servicio real va la que entrega el Grupo 2.
+      ESTUDIARIO_API_KEY: ${ESTUDIARIO_API_KEY:-clave-para-el-mock}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    # Sin puerto publicado: se accede por el gateway. Para probar sin gateway: 8082.
+    ports: ["8082:8080"]
+    restart: on-failure
+    depends_on:
+      mysql: { condition: service_healthy }
+      rabbitmq: { condition: service_started }
+      jaeger: { condition: service_started }
+
+  # Catálogo en dos instancias (ADR-012). El gateway las balancea para el frontend;
+  # Reservas les llega por el alias de red "catalogo", sin pasar por el gateway.
+  catalogo-1:
+    <<: *catalogo
+    environment:
+      <<: *catalogo-env
+      INSTANCIA_ID: catalogo-1
+    networks:
+      default:
+        aliases: [catalogo]
+    ports: ["8083:8080"]
+
+  catalogo-2:
+    <<: *catalogo
+    environment:
+      <<: *catalogo-env
+      INSTANCIA_ID: catalogo-2
+    networks:
+      default:
+        aliases: [catalogo]
+    ports: ["8084:8080"]
+
+  # Mock de la API interna de retenciones de Catálogo (docs/contracts/internos/).
+  # Sirve para probar Reservas sin Catálogo (CATALOGO_URL=http://catalogo-mock:4010).
+  catalogo-mock:
+    image: stoplight/prism:5
+    command: mock -h 0.0.0.0 --multiprocess=false /contracts/catalogo-retenciones.yaml
+    volumes:
+      - ./docs/contracts/internos/catalogo-retenciones.yaml:/contracts/catalogo-retenciones.yaml:ro
+    ports: ["4020:4010"]
+
+  # Mock de la capacidad que consumimos (Estudiario, Grupo 2), con el contrato fijado.
+  estudiario-mock:
+    image: stoplight/prism:5
+    command: mock -h 0.0.0.0 --multiprocess=false /contracts/documents-v1.yaml
+    volumes:
+      - ./docs/contracts/consumidos/estudiario/1.0.0/documents-v1.yaml:/contracts/documents-v1.yaml:ro
+    ports: ["4030:4010"]
+
+  # Frontend (React + Vite) servido por nginx, que deriva /api al gateway.
+  # Mientras el gateway no exista usa datos de demostración (FRONTEND_DATOS_FALSOS=false para el gateway).
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_DATOS_FALSOS: ${FRONTEND_DATOS_FALSOS:-true}
+    environment:
+      GATEWAY_URL: ${FRONTEND_GATEWAY_URL:-http://gateway:8080}
+    ports: ["5173:80"]
+
   # --- Servicios que se habilitan a medida que se implementan ---
   # gateway:      { build: ./gateway, ports: ["8080:8080"], env_file: .env }
   # usuarios:     { build: ./services/usuarios, env_file: .env, depends_on: [mysql] }
-  # catalogo:     { build: ./services/catalogo, env_file: .env, depends_on: [mongo, mysql, opensearch, rabbitmq] }  # mysql: inventario y retenciones (ADR-014)
-  # reservas:     { build: ./services/reservas, env_file: .env, depends_on: [mysql, rabbitmq] }
   # tiempo-real:  { build: ./services/tiempo-real, env_file: .env, depends_on: [rabbitmq] }  # sin estado, SSE vía gateway (ADR-015)
-  # frontend:     { build: ./frontend, ports: ["5173:5173"] }
 
 volumes:
   mysql-data:
