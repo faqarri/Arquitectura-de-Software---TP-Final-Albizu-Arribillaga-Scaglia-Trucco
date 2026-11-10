@@ -97,7 +97,7 @@ Compartido en `pkg/`: `mensajeria` (reconexión, outbox, reintentos con DLQ) y `
 | `DB_PASSWORD` | — (obligatoria) | `RESERVAS_DB_PASSWORD` del `.env` |
 | `RABBITMQ_URL` | — (obligatoria) | |
 | `CATALOGO_URL` | `http://catalogo:8080` (en compose: `catalogo-mock`) | API interna de Catálogo |
-| `ESTUDIARIO_URL` | `http://estudiario-mock:4010` | URL pública de Estudiario, cuando la publiquen |
+| `ESTUDIARIO_URL` | `http://estudiario-mock:4010` | URL de Estudiario en la nube (en el `.env`); sin ella, su mock |
 | `ESTUDIARIO_API_KEY` | vacía (en compose: una clave para el mock) | La entrega el Grupo 2 por privado. Va en `.env` |
 | `RECUPERACION_COMPRAS_INTERVALO` · `GUIAS_ENVIO_INTERVALO` · `GUIAS_MODERACION_INTERVALO` | `10s` · `30s` · `5m` | Procesos periódicos |
 

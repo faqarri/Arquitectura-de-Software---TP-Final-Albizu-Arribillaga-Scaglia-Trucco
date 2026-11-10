@@ -106,6 +106,22 @@ func TestPropagaLaCorrelacion(t *testing.T) {
 	}
 }
 
+func TestEnlacePublicoAlPDF(t *testing.T) {
+	srv, _, _ := servidor(t, ok(paginaValida, 200))
+	p, err := clienteRapido(srv.URL).Buscar(context.Background(), Busqueda{})
+	if err != nil || p.Guias[0].URLDescarga != "" {
+		t.Fatalf("sin URLPublica no debería haber enlace: %+v err=%v", p, err)
+	}
+	cli := NuevoCliente(Config{URL: srv.URL, APIKey: "k", URLPublica: "https://estudiario.example/"})
+	p, err = cli.Buscar(context.Background(), Busqueda{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Guias[0].URLDescarga; got != "https://estudiario.example/v1/public/documents/abc12345/file" {
+		t.Errorf("URLDescarga = %q", got)
+	}
+}
+
 func TestLectorTolerante(t *testing.T) {
 	cuerpo := strings.Replace(paginaValida, `"aprobado"`, `"archivado"`, 1)
 	srv, _, _ := servidor(t, ok(cuerpo, 200))

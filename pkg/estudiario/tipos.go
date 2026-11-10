@@ -38,8 +38,11 @@ type Guia struct {
 	Calificacion           *float64
 	CantidadCalificaciones int
 	RutaDescarga           string
-	TamanioBytes           int64
-	PublicadaEn            *time.Time
+	// URLDescarga es el enlace público al PDF (sin API Key), para el navegador.
+	// Solo lo completa Buscar, y solo con Config.URLPublica configurada.
+	URLDescarga  string
+	TamanioBytes int64
+	PublicadaEn  *time.Time
 }
 
 // Pagina es una página de resultados.

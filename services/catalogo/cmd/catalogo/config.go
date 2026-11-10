@@ -20,9 +20,11 @@ type config struct {
 	cacheHabilitada  bool
 	estudiarioURL    string
 	estudiarioAPIKey string
-	retencionMinutos int
-	maxPorOferta     int
-	intervaloBarrido time.Duration
+	// Base pública para descargar los PDF; vacía con el mock (no hay enlace).
+	estudiarioURLPublica string
+	retencionMinutos     int
+	maxPorOferta         int
+	intervaloBarrido     time.Duration
 }
 
 // cargarConfig lee la configuración de variables de entorno. Los secretos no
@@ -47,13 +49,14 @@ func cargarConfig() (config, error) {
 			Password: requerida("DB_PASSWORD"),
 			Nombre:   conDefecto("DB_NOMBRE", "catalogo"),
 		},
-		mongoURL:         conDefecto("MONGO_URL", "mongodb://localhost:27017"),
-		mongoBase:        conDefecto("MONGO_BASE", "catalogo"),
-		rabbitURL:        requerida("RABBITMQ_URL"),
-		redisURL:         os.Getenv("REDIS_URL"),
-		cacheHabilitada:  conDefecto("CACHE_HABILITADA", "true") == "true",
-		estudiarioURL:    conDefecto("ESTUDIARIO_URL", "http://estudiario-mock:4010"),
-		estudiarioAPIKey: os.Getenv("ESTUDIARIO_API_KEY"),
+		mongoURL:             conDefecto("MONGO_URL", "mongodb://localhost:27017"),
+		mongoBase:            conDefecto("MONGO_BASE", "catalogo"),
+		rabbitURL:            requerida("RABBITMQ_URL"),
+		redisURL:             os.Getenv("REDIS_URL"),
+		cacheHabilitada:      conDefecto("CACHE_HABILITADA", "true") == "true",
+		estudiarioURL:        conDefecto("ESTUDIARIO_URL", "http://estudiario-mock:4010"),
+		estudiarioAPIKey:     os.Getenv("ESTUDIARIO_API_KEY"),
+		estudiarioURLPublica: os.Getenv("ESTUDIARIO_URL_PUBLICA"),
 	}
 	var err error
 	if cfg.retencionMinutos, err = entero("RETENCION_MINUTOS", 15); err != nil {

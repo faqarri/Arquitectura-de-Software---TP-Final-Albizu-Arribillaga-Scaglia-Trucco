@@ -24,6 +24,9 @@ x-catalogo: &catalogo
     RETENCION_BARRIDO_SEGUNDOS: ${RETENCION_BARRIDO_SEGUNDOS:-15}
     ESTUDIARIO_URL: ${ESTUDIARIO_URL:-http://estudiario-mock:4010}
     ESTUDIARIO_API_KEY: ${ESTUDIARIO_API_KEY:-clave-para-el-mock}
+    # Enlace público al PDF de cada guía (lo abre el navegador, sin clave). Con el
+    # mock queda vacía y el detalle no muestra "Descargar PDF".
+    ESTUDIARIO_URL_PUBLICA: ${ESTUDIARIO_URL:-}
     OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   restart: on-failure
   depends_on:

@@ -25,6 +25,8 @@ type GuiaDestino struct {
 	Etiquetas              []string `json:"etiquetas"`
 	Calificacion           *float64 `json:"calificacion"`
 	CantidadCalificaciones int      `json:"cantidadCalificaciones"`
+	// URLDescarga es el enlace público al PDF; no está cuando se usa el mock.
+	URLDescarga string `json:"urlDescarga,omitempty"`
 }
 
 type GuiasDestino struct {
@@ -73,7 +75,7 @@ func (s *Guias) DeLaOferta(ctx context.Context, ofertaID string) (GuiasDestino, 
 		}
 		res.Guias = append(res.Guias, GuiaDestino{
 			ID: g.ID, Titulo: g.Titulo, Descripcion: g.Descripcion, Autor: g.Autor, Etiquetas: etiquetas,
-			Calificacion: g.Calificacion, CantidadCalificaciones: g.CantidadCalificaciones,
+			Calificacion: g.Calificacion, CantidadCalificaciones: g.CantidadCalificaciones, URLDescarga: g.URLDescarga,
 		})
 	}
 	s.cache.GuardarGuias(ctx, o.Destino, res)

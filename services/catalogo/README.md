@@ -34,7 +34,7 @@ Estados de retención: `ACTIVA`, `CONFIRMADA`, `LIBERADA`, `VENCIDA`. Una retenc
 |---|---|---|
 | `GET /api/ofertas/{id}` | Libre | `Oferta`. Header `X-Cache: HIT` o `MISS`. Con `X-Usuario-Rol: admin` lee siempre de MongoDB, ve las despublicadas e incluye `cupoTotal` y `vendidos` |
 | `GET /api/ofertas/{id}/disponibilidad` | Libre | `{ofertaId, estado, libres, proximaLiberacion, version}`. **Nunca se cachea** |
-| `GET /api/ofertas/{id}/guias` | Libre | `{disponible, guias: [{id, titulo, descripcion, autor, etiquetas, calificacion, cantidadCalificaciones}]}` |
+| `GET /api/ofertas/{id}/guias` | Libre | `{disponible, guias: [{id, titulo, descripcion, autor, etiquetas, calificacion, cantidadCalificaciones, urlDescarga?}]}`. `urlDescarga` es el enlace público al PDF en Estudiario (se abre sin clave); no viene con el mock |
 | `POST /api/ofertas` · `PUT /api/ofertas/{id}` · `DELETE /api/ofertas/{id}` | `admin` | La oferta (`201` / `200`) o `204`. El `DELETE` es una baja lógica |
 | `GET /api/packs` · `GET /api/packs/{id}` | Libre | `{packs: Pack[]}` · `Pack` con sus `opciones` publicadas |
 | `POST /api/packs` | `admin` | `201` con el pack |
@@ -123,6 +123,7 @@ Los dos primeros salen del outbox de MySQL, en la misma transacción que el camb
 | `CACHE_HABILITADA` | `true` | `false` para medir sin caché (ADR-007) |
 | `RETENCION_MINUTOS`, `RETENCION_MAX_CUPOS_POR_OFERTA`, `RETENCION_BARRIDO_SEGUNDOS` | `15`, `6`, `15` | ADR-014 |
 | `ESTUDIARIO_URL`, `ESTUDIARIO_API_KEY` | mock, vacía | Proveedor de guías |
+| `ESTUDIARIO_URL_PUBLICA` | vacía (en compose: igual a `ESTUDIARIO_URL` del `.env`) | Base del enlace "Descargar PDF". Vacía: las guías no traen enlace |
 
 ## Estructura (Go, arquitectura en capas, [ADR-002](../../docs/adr/ADR-002-arquitectura-interna.md))
 

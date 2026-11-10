@@ -98,7 +98,9 @@ func ejecutar(log *slog.Logger) error {
 	retenciones := services.NuevoRetenciones(ofertasRepo, packsRepo, inventario,
 		services.ConfigRetenciones{Minutos: cfg.retencionMinutos, MaxPorOferta: cfg.maxPorOferta})
 	guias := services.NuevoGuias(ofertas,
-		estudiario.NuevoCliente(estudiario.Config{URL: cfg.estudiarioURL, APIKey: cfg.estudiarioAPIKey}), cache, log)
+		estudiario.NuevoCliente(estudiario.Config{
+			URL: cfg.estudiarioURL, APIKey: cfg.estudiarioAPIKey, URLPublica: cfg.estudiarioURLPublica,
+		}), cache, log)
 
 	// Capa HTTP.
 	servidor := &http.Server{

@@ -23,6 +23,11 @@ import (
 type Config struct {
 	URL    string // base, sin /v1, por ejemplo https://estudiario.example
 	APIKey string
+	// URLPublica es la base desde la que el navegador descarga el PDF de una
+	// guía publicada, sin API Key (/v1/public/documents/{id}/file, ruta que el
+	// proveedor agregó al desplegar y no figura en el contrato 1.0.0). Vacía:
+	// las guías no traen enlace (el mock no sirve esa ruta).
+	URLPublica string
 
 	// Lecturas (buscar, listar): las usa un usuario esperando una pantalla, así
 	// que van con timeout corto y pocos reintentos (ADR-009: 2 s y 2 reintentos).
@@ -62,6 +67,7 @@ func (c Config) conDefectos() Config {
 		c.HTTP = &http.Client{}
 	}
 	c.URL = strings.TrimRight(c.URL, "/")
+	c.URLPublica = strings.TrimRight(c.URLPublica, "/")
 	return c
 }
 
@@ -106,7 +112,14 @@ func (c *Cliente) Buscar(ctx context.Context, b Busqueda) (Pagina, error) {
 	if err != nil {
 		return Pagina{}, err
 	}
-	return p.aPagina()
+	pagina, err := p.aPagina()
+	if err != nil || c.cfg.URLPublica == "" {
+		return pagina, err
+	}
+	for i := range pagina.Guias {
+		pagina.Guias[i].URLDescarga = c.cfg.URLPublica + "/v1/public/documents/" + url.PathEscape(pagina.Guias[i].ID) + "/file"
+	}
+	return pagina, nil
 }
 
 // Registradas lista las guías que registramos, en cualquier estado
