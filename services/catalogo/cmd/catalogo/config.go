@@ -22,6 +22,8 @@ type config struct {
 	estudiarioAPIKey string
 	// Base pública para descargar los PDF; vacía con el mock (no hay enlace).
 	estudiarioURLPublica string
+	opensearchURL        string
+	aliasBusqueda        string
 	retencionMinutos     int
 	maxPorOferta         int
 	intervaloBarrido     time.Duration
@@ -57,6 +59,8 @@ func cargarConfig() (config, error) {
 		estudiarioURL:        conDefecto("ESTUDIARIO_URL", "http://estudiario-mock:4010"),
 		estudiarioAPIKey:     os.Getenv("ESTUDIARIO_API_KEY"),
 		estudiarioURLPublica: os.Getenv("ESTUDIARIO_URL_PUBLICA"),
+		opensearchURL:        conDefecto("OPENSEARCH_URL", "http://localhost:9200"),
+		aliasBusqueda:        conDefecto("BUSQUEDA_ALIAS", "ofertas"),
 	}
 	var err error
 	if cfg.retencionMinutos, err = entero("RETENCION_MINUTOS", 15); err != nil {

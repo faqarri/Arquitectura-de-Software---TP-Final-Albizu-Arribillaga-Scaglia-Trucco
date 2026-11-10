@@ -17,6 +17,8 @@ x-catalogo: &catalogo
     MONGO_URL: mongodb://mongo:27017
     RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
     REDIS_URL: redis://redis:6379/0
+    # Índice de búsqueda (ADR-006). Si OpenSearch no responde, solo /api/busqueda da 503.
+    OPENSEARCH_URL: http://opensearch:9200
     # false para medir sin caché (comparación antes/después de ADR-007).
     CACHE_HABILITADA: ${CACHE_HABILITADA:-true}
     RETENCION_MINUTOS: ${RETENCION_MINUTOS:-15}
@@ -34,6 +36,7 @@ x-catalogo: &catalogo
     mongo: { condition: service_started }
     rabbitmq: { condition: service_started }
     redis: { condition: service_started }
+    opensearch: { condition: service_started }
     jaeger: { condition: service_started }
 
 services:
@@ -95,6 +98,9 @@ services:
     image: jaegertracing/all-in-one:1.62.0
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+      # Guarda las trazas en memoria: sin límite, una prueba de carga (cientos de
+      # miles de solicitudes) le hizo ocupar 5,5 GB y dejó sin memoria al resto.
+      MEMORY_MAX_TRACES: "20000"
     ports: ["16686:16686", "4318:4318"]
 
   prometheus:

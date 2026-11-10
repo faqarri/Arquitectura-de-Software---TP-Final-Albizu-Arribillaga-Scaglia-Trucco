@@ -1,6 +1,6 @@
 # ADR-013: Capacidad y costos
 
-- **Estado:** Aceptada (primera versión: escenario A ejecutado el 2026-10-23; el escenario B se ejecuta cuando existan Catálogo y Reservas; ver [Revisiones](#revisiones))
+- **Estado:** Aceptada (escenario A ejecutado el 2026-10-23; escenario B, caché y búsqueda el 2026-11-10; ver [Revisiones](#revisiones))
 - **Fecha:** 2026-10-23
 - **Decisión de la cátedra:** D13
 
@@ -75,7 +75,9 @@ export default function () {
 
 **Objetivos (no medidos):** con 20 solicitudes por segundo, p95 ≤ 300 ms, p99 < 500 ms (el objetivo de servicio de [ADR-011](ADR-011-observabilidad.md)) y menos de 0,1 % de errores; el 95 % de los correos llega a `ENVIADO` en 60 s o menos (también de ADR-011), sin acumulación sostenida en la cola.
 
-### Escenario B: flujo de compra (plan, cuando estén Catálogo y Reservas)
+### Escenario B: flujo de compra
+
+Script: [`tests/carga/compras.js`](../../tests/carga/compras.js). Las lecturas de Catálogo (detalle con y sin caché, búsqueda y retraso del índice) están en [`tests/carga/catalogo.js`](../../tests/carga/catalogo.js). Resultados en [Resultados del escenario B](#resultados-del-escenario-b).
 
 | Corrida | Carga | Qué se verifica |
 |---|---|---|
@@ -88,17 +90,19 @@ export default function () {
 Se ordenan por probabilidad. La prueba confirma o descarta cada una.
 
 1. **Envío de correos (Comprobantes).** El worker genera un PDF y hace una conexión SMTP por correo. Si se emite más rápido de lo que se envía, la cola `comprobantes.envios` crece sin parar. No afecta la latencia del `POST` (que solo inserta), pero sí el tiempo hasta `ENVIADO`. Señal: cola creciente con CPU del worker alta o esperas de SMTP. **Resultado: casi.** El límite estuvo en el camino asíncrono, pero un paso antes: el **publicador del outbox** (ver [Resultados](#resultados)). La cola de envíos nunca pasó de 2 mensajes.
-2. **Pool de conexiones de MySQL de Comprobantes (20).** Cada `POST` usa una transacción (comprobante, ítems y outbox) y cada commit escribe a disco. Señal: conexiones en espera mayores que cero y latencia creciente con la CPU de MySQL disponible.
-3. **Contención en la fila de inventario de una oferta caliente (Catálogo).** La regla de bloqueo de ADR-014 serializa todas las operaciones de una misma oferta: la capacidad para esa oferta es aproximadamente 1 / duración de la transacción, sin importar cuántas instancias haya. Señal: en B2, la latencia de retener crece de forma lineal con la cantidad de usuarios concurrentes. Es un límite **deliberado**, porque garantiza RN-01.
+2. **Pool de conexiones de MySQL de Comprobantes (20).** Cada `POST` usa una transacción (comprobante, ítems y outbox) y cada commit escribe a disco. Señal: conexiones en espera mayores que cero y latencia creciente con la CPU de MySQL disponible. **Resultado: no apareció** en A; en B el límite fue la CPU de MySQL compartido, no el pool.
+3. **Contención en la fila de inventario de una oferta caliente (Catálogo).** La regla de bloqueo de ADR-014 serializa todas las operaciones de una misma oferta: la capacidad para esa oferta es aproximadamente 1 / duración de la transacción, sin importar cuántas instancias haya. Señal: en B2, la latencia de retener crece de forma lineal con la cantidad de usuarios concurrentes. Es un límite **deliberado**, porque garantiza RN-01. **Resultado: confirmada** en B2: 341 esperas de bloqueo y retener con p95 de 3,4 s con 200 usuarios a la vez sobre la misma oferta, sin vender un cupo de más.
 
 ### Alternativas de escalado
 
 | Límite | Alternativa | Costo |
 |---|---|---|
-| **Publicador del outbox (límite medido: ≈ 45 eventos/s)** | Hoy publica un lote de 50 eventos por segundo (`tamanioLoteOutbox = 50`, `IntervaloOutbox = 1 s`), cada uno con su confirmación y su `UPDATE`. Alternativas, de menor a mayor esfuerzo: (1) volver a leer enseguida mientras el lote venga lleno, en lugar de esperar al próximo segundo; (2) lotes más grandes, con confirmaciones del broker en bloque y un solo `UPDATE ... WHERE id IN (...)`; (3) varios publicadores, cada uno con `SELECT ... FOR UPDATE SKIP LOCKED` sobre el outbox | Bajo. La opción 1 es un cambio de pocas líneas |
+| **Publicador del outbox (límite medido: ≈ 40-45 eventos/s, en Comprobantes y en Reservas)** | Publica de a un evento: confirmación del broker y `UPDATE` con commit por evento, ≈ 25 ms cada uno. **Diagnóstico corregido el 2026-11-10:** se probó la opción (1), volver a leer enseguida mientras el lote venga lleno, y el ritmo siguió en ~40 eventos/s: el techo no es la espera de 1 s entre lotes sino el costo por evento (con `innodb_flush_log_at_trx_commit = 1` y `sync_binlog = 1`, cada commit va a disco). La opción que ataca la causa es la (2): publicar el lote entero, esperar las confirmaciones en bloque y marcar con un solo `UPDATE ... WHERE id IN (...)`. La (3), varios publicadores con `SELECT ... FOR UPDATE SKIP LOCKED`, multiplica el ritmo sin cambiar el costo por evento | Medio: la opción 2 cambia el `Publicador` compartido de `pkg/mensajeria` y el de Comprobantes |
 | Envío de correos | Varios consumidores del worker (`prefetch` mayor o más instancias); conexión SMTP reutilizada | Bajo. El estado ya está en la base |
 | Pool de MySQL de Comprobantes | Más instancias del servicio (no tiene estado propio) y luego más recursos para MySQL (escalado vertical) | Con varias instancias, el límite de 60 solicitudes por minuto debe contarse en Redis y no en memoria |
-| Oferta caliente | **Partir el cupo** de la oferta en N filas de inventario (por ejemplo, 4 filas de 25 cupos) y retener en cualquiera con lugar | Alto: complica el cálculo de disponibilidad y la regla de bloqueo. Solo si B2 muestra que hace falta |
+| **MySQL compartido (límite medido en B1: ~5 núcleos a 112 compras/s)** | Catálogo, Reservas y Comprobantes usan el mismo servidor con esquemas separados (ADR-003). Primero, más recursos para MySQL (escalado vertical); después, separar el servidor de Catálogo (el más exigido: inventario, retenciones y confirmaciones), algo que el esquema por servicio ya permite sin cambiar código | Bajo el primero; medio el segundo (una base más para operar) |
+| Oferta caliente | **Partir el cupo** de la oferta en N filas de inventario (por ejemplo, 4 filas de 25 cupos) y retener en cualquiera con lugar | Alto: complica el cálculo de disponibilidad y la regla de bloqueo. B2 muestra que con 200 personas a la vez sobre la misma oferta la última espera ~3,5 s: aceptable para un caso extremo, así que **no se hace** |
+| Búsqueda (OpenSearch) | Es lo primero que se satura en las lecturas (~3,8 núcleos a 1080 búsquedas/s). Más memoria y CPU para el nodo; después, réplicas del índice en un segundo nodo | Bajo el primero; medio el segundo |
 | Catálogo en general | Más instancias detrás del gateway (D12): bloqueos de fila en MySQL y `SKIP LOCKED` en el barrido ya lo permiten | Bajo |
 
 ### Estimación de costos del despliegue de Comprobantes
@@ -160,7 +164,29 @@ Precios tomados de fuentes públicas el 2026-10-23. Las fuentes no coinciden ent
 - **Contexto:** la carga esperada de la capacidad publicada (un grupo consumidor, decenas de solicitudes por día, con un máximo de 60 por minuto por API Key) está más de 1000 veces por debajo de lo probado. El límite del outbox importa para picos de compras propias, no para el uso externo previsto.
 - **Limitaciones de la medición:** k6 y el sistema compartieron la máquina; Mailpit acepta correos mucho más rápido que un SMTP real, así que en producción el envío podría pasar a ser el límite; y los datos de CPU son de `docker stats`, porque Prometheus todavía no está desplegado.
 
-Pendiente: escenario B (flujo de compra y oferta caliente) cuando existan Catálogo y Reservas, y la medición de caché antes y después de [ADR-007](ADR-007-cache.md).
+### Resultados del escenario B
+
+**Entorno:** el mismo de A (Docker Desktop en Windows 11, 16 CPU y 7,4 GiB para Docker), con todo el sistema en `docker compose`: `catalogo-1` y `catalogo-2`, Reservas, Comprobantes, MySQL 8.4, MongoDB 7, Redis 7, OpenSearch 2.15, RabbitMQ 3.13, Mailpit y Jaeger. Sin gateway todavía: k6 llama a los servicios con los headers de identidad que pondría el gateway, y a Catálogo por el alias de red de las dos instancias. Fecha: 2026-11-10. k6 0.54.0.
+
+| Corrida | Carga | Resultado | Latencia |
+|---|---|---|---|
+| **B1. Demanda distribuida** | 200 usuarios virtuales sin pausa durante 2 min; cada uno consulta la disponibilidad, retiene 1 cupo de una de 500 ofertas y compra | **14 493 compras, todas `CONFIRMADA`** (112 por segundo), 0 errores | Retener: p50 449 ms, p95 1,05 s · Comprar: p50 1,06 s, p95 1,95 s |
+| **B2. Oferta caliente** | 200 usuarios virtuales a la vez contra una oferta de **50 cupos** | **Exactamente 50 retenciones y 50 compras**; 150 `409` sin cupo; al final, vendidos 50 de 50 y estado `AGOTADA` (RN-01 se cumple) | Retener: p50 1,95 s, p95 3,39 s · 341 esperas de bloqueo de fila (`Innodb_row_lock_waits`) |
+| Detalle sin caché | 50 usuarios virtuales, 3 min ([ADR-007](ADR-007-cache.md)) | 4363 solicitudes/s, 0 errores | p50 9,2 ms, p95 24,7 ms, p99 35,8 ms |
+| Detalle con caché | Igual | 6172 solicitudes/s, 0 errores, 90 % de aciertos | p50 6,0 ms, p95 16,8 ms, p99 24,4 ms |
+| Búsqueda | 20 usuarios virtuales, 2 min, filtros y órdenes al azar | 1082 solicitudes/s, 0 errores | p50 15 ms, p95 37 ms, p99 56 ms |
+| Retraso del índice | 100 cambios de precio, uno por vez ([ADR-006](ADR-006-busqueda.md)) | Ninguno sin aparecer | p50 1,00 s, p95 1,11 s, máx. 1,17 s |
+
+**CPU durante B1** (`docker stats`, 100 % = un núcleo): MySQL **~505 %**, Reservas ~237 %, `catalogo-1` + `catalogo-2` ~320 %, Comprobantes ~17 %, RabbitMQ ~22 %.
+
+**Análisis:**
+
+- **El límite principal del flujo de compra es MySQL**, que comparten Catálogo (inventario, retenciones y confirmaciones con bloqueo de fila), Reservas (carrito, compras y outbox) y Comprobantes. A 112 compras por segundo usa unos 5 núcleos, y la latencia de comprar (dos transacciones en Reservas más la confirmación en Catálogo) es la que más crece. Alternativa: escalado vertical y, si hace falta, un servidor aparte para Catálogo (ver Alternativas de escalado).
+- **El segundo límite es otra vez el publicador del outbox**, ahora en Reservas: las compras se confirman a 112 por segundo, pero `CompraConfirmada` sale a ~40 por segundo. Al terminar B1 quedaban ~12 400 eventos en el outbox y las facturas llegaron en los ~5 minutos siguientes. **No se perdió nada:** 14 543 compras `CONFIRMADA` (incluidas las de la prueba de humo) terminaron en 14 543 comprobantes `ENVIADO`, con todas las DLQ vacías. El diagnóstico se corrigió (ver Alternativas de escalado): el techo es el costo por evento, no la espera entre lotes.
+- **La oferta caliente se comporta como se diseñó** (hipótesis 3): la consistencia no se rompe con 200 usuarios a la vez, y el costo es la espera de los últimos en la fila (~3,5 s).
+- **Las lecturas no son el problema:** el detalle, con caché, aguanta más de 6000 solicitudes por segundo y deja a MongoDB casi sin carga; la búsqueda, más de 1000 por segundo.
+- **Contexto:** la demanda esperada de una agencia de viajes de la cursada está órdenes de magnitud por debajo. Estos límites importan para un pico de ventas (por ejemplo, una promoción), no para el uso normal.
+- **Limitaciones de la medición:** k6 y todo el sistema en la misma máquina; sin gateway (su costo no está medido); Mailpit en lugar de un SMTP real; CPU de `docker stats`. Jaeger guardaba trazas en memoria sin límite y en una primera corrida llegó a 5,5 GB: se limitó a 20 000 trazas y las mediciones de la tabla se hicieron después. **B3 (vencimiento masivo) no se ejecutó.**
 
 ## Alternativas consideradas
 
@@ -174,8 +200,10 @@ Pendiente: escenario B (flujo de compra y oferta caliente) cuando existan Catál
 - (+) El escenario A está medido: la API cumple los objetivos con amplio margen y se identificó el principal límite (publicador del outbox, ≈ 45 eventos/s), que tiene una solución de bajo costo.
 - (+) Las hipótesis indican qué mirar primero y qué escalar.
 - (+) El despliegue cuesta alrededor de USD 6 por mes.
-- (−) El flujo de compra (escenario B) y la caché todavía no están medidos.
-- (−) Mientras no se ajuste el publicador del outbox, un pico de más de ~45 emisiones por segundo atrasa los correos (sin perderlos).
+- (+) El escenario B está medido: el flujo de compra soporta ~110 compras por segundo en una sola máquina sin errores ni sobreventa, y la caché y la búsqueda cumplen sus objetivos.
+- (−) Mientras no se cambie el publicador del outbox (opción 2), un pico de más de ~40 compras o emisiones por segundo atrasa las facturas (sin perderlas).
+- (−) MySQL, compartido por tres servicios, es el límite del flujo de compra.
+- (−) B3 (vencimiento masivo de retenciones) no está medido.
 - (−) La VM es un único punto de falla, y las copias de seguridad y las actualizaciones las operamos nosotros.
 - (−) La prueba de carga exige configurar varias API Keys de prueba, o un límite de solicitudes configurable.
 
@@ -184,3 +212,4 @@ Pendiente: escenario B (flujo de compra y oferta caliente) cuando existan Catál
 | Fecha | Cambio | Motivo |
 |---|---|---|
 | 2026-10-23 | Se ejecuta el escenario A (A1 a A5) y se registran los resultados. El requisito previo pasa de 50 a **400 API Keys repartidas por solicitud** y, en A4, el reintento usa la misma API Key que la solicitud original. Se agrega a las alternativas de escalado el publicador del outbox, que resultó ser el principal límite. Pasa de Propuesta a Aceptada como primera versión. | Al preparar A3 se vio que 50 claves de 60 por minuto solo permiten 50 solicitudes por segundo: la rampa hasta 300 habría medido el limitador. Además, como la idempotencia es por consumidor, un reintento con otra API Key es una emisión nueva y no prueba la idempotencia. |
+| 2026-11-10 | Se ejecuta el escenario B (B1 y B2) y las mediciones de caché ([ADR-007](ADR-007-cache.md)), búsqueda y retraso del índice ([ADR-006](ADR-006-busqueda.md)); scripts `tests/carga/compras.js` y `tests/carga/catalogo.js`. Se confirma la hipótesis 3. Se corrige el diagnóstico del publicador del outbox: se probó la opción 1 y no cambió el ritmo (≈ 40 eventos/s), porque el costo está en cada evento; la alternativa recomendada pasa a ser la 2. Se agregan MySQL compartido y OpenSearch a las alternativas de escalado. Se limita Jaeger a 20 000 trazas en memoria. B3 queda sin ejecutar. | Plan de desarrollo §4.4, paso 4. |

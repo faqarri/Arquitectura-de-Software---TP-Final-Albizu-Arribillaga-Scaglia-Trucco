@@ -150,6 +150,53 @@ func publicarOfertas(ctx context.Context, log *slog.Logger, pub mensajeria.Publi
 	return nil
 }
 
+// Indexador es lo que se usa de services.Busqueda.
+type Indexador interface {
+	Indexar(ctx context.Context, ofertaID string) error
+}
+
+// IniciarIndexador consume catalogo.indexacion y lleva cada oferta modificada
+// al índice de búsqueda (ADR-006). Las dos instancias consumen la misma cola
+// (consumidores en competencia): cada cambio lo indexa una sola. Si OpenSearch
+// o MongoDB fallan, el mensaje se reintenta a los 5, 15 y 30 s y después va a
+// catalogo.indexacion.dlq; esa oferta puede quedar desactualizada hasta
+// reprocesar la DLQ o reconstruir el índice.
+func IniciarIndexador(ctx context.Context, url string, log *slog.Logger, idx Indexador) error {
+	log = log.With("componente", "indexador de búsqueda")
+	cfg := mensajeria.ConfigConsumo{
+		Cola:       colaIndexacion,
+		NombreSpan: "indexar oferta",
+		Topologia:  declararOfertas,
+	}
+	return mensajeria.MantenerConexion(ctx, url, log, "indexador de búsqueda", func(ctx context.Context, conn *amqp.Connection) error {
+		return mensajeria.Consumir(ctx, conn, cfg, log, ManejadorIndexacion(log, idx))
+	})
+}
+
+// ManejadorIndexacion procesa un OfertaActualizada. Exportado para probarlo sin broker.
+func ManejadorIndexacion(log *slog.Logger, idx Indexador) mensajeria.Manejador {
+	return func(ctx context.Context, d amqp.Delivery) (mensajeria.Resultado, error) {
+		var ev eventoOfertaActualizada
+		if err := json.Unmarshal(d.Body, &ev); err != nil || ev.OfertaID == "" {
+			log.Error("OfertaActualizada mal formada: va a la DLQ", "cuerpo", string(d.Body))
+			return mensajeria.Descartar, fmt.Errorf("OfertaActualizada mal formada")
+		}
+		err := idx.Indexar(ctx, ev.OfertaID)
+		switch n := mensajeria.Intentos(d.Headers); {
+		case err == nil:
+			log.Debug("oferta indexada", "oferta_id", ev.OfertaID, "version", ev.Version)
+			return mensajeria.Confirmar, nil
+		case n < mensajeria.MaxIntentos:
+			log.Warn("no se pudo indexar la oferta, se reintenta", "oferta_id", ev.OfertaID, "error", err, "intento", n+1)
+			return mensajeria.Reintentar, err
+		default:
+			log.Error("se agotaron los reintentos: la oferta va a la DLQ y puede quedar desactualizada en la búsqueda",
+				"oferta_id", ev.OfertaID, "error", err)
+			return mensajeria.Descartar, err
+		}
+	}
+}
+
 // InvalidadorCache es lo que se usa de services.Ofertas.
 type InvalidadorCache interface {
 	InvalidarCache(ctx context.Context, ofertaID string)

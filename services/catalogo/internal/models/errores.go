@@ -19,6 +19,10 @@ const (
 	CodigoSolicitudInvalida  = "solicitud-invalida"
 	CodigoNoEncontrado       = "no-encontrado"
 	CodigoDependenciaCaida   = "servicio-no-disponible"
+	// CodigoBusquedaNoDisponible: OpenSearch no responde (ADR-006). El resto de
+	// Catálogo sigue funcionando.
+	CodigoBusquedaNoDisponible  = "busqueda-no-disponible"
+	CodigoReconstruccionEnCurso = "reconstruccion-en-curso"
 )
 
 // ErrNoEncontrado: la oferta o el pack no existen (o están despublicados).

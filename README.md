@@ -39,40 +39,39 @@ Grafana requiere que `GRAFANA_DB_PASSWORD` esté definida en `.env`; se usa para
 
 Si el puerto local `3306` ya está ocupado, configurá `MYSQL_PUERTO=3307` en `.env`; Compose seguirá conectando los servicios entre sí por la red interna. El endpoint de prueba `GET /error` devuelve HTTP 500 y registra un log `ERROR`, pero está desactivado por defecto (`HABILITAR_ENDPOINT_ERROR_PRUEBA=false`). Para habilitarlo en local, cambiá esa variable a `true` en `.env` y recreá Comprobantes con `docker compose up --build -d comprobantes`. Mantenelo deshabilitado en cualquier entorno compartido o desplegado.
 
-Componentes disponibles en esta etapa:
+Componentes:
 
 | Componente | URL local |
 |---|---|
-| Servicio Comprobantes (API pública v1) | http://localhost:8081 (salud: `/health`) |
+| Frontend (React) | http://localhost:5173 |
+| Catálogo, instancias 1 y 2 (ofertas, packs, cupos, búsqueda) | http://localhost:8083 · http://localhost:8084 (salud: `/health`) |
+| Reservas (carrito, compras, guías) | http://localhost:8082 |
+| Comprobantes (API pública v1, capacidad publicada) | http://localhost:8081 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 (dashboard **Agencia de Viajes - Observabilidad**, carpeta **Observabilidad**) |
-| Mock del contrato de Comprobantes (Prism) | http://localhost:4010 |
+| Jaeger (trazas distribuidas) | http://localhost:16686 |
 | RabbitMQ (management) | http://localhost:15672 |
 | Mailpit (bandeja de correo local) | http://localhost:8025 |
-| Jaeger (trazas distribuidas) | http://localhost:16686 |
-| OpenSearch | http://localhost:9200 |
+| OpenSearch · MongoDB · Redis · MySQL | `:9200` · `:27017` · `:6379` · `:3306` (o `MYSQL_PUERTO`) |
+| Mocks (Prism) de Comprobantes, de la API interna de Catálogo y de Estudiario | http://localhost:4010 · :4020 · :4030 |
 
-> Estado: Entrega 2 (28/10/2026). Están documentadas las decisiones D2, D6, D7, D9 (estrategia general, a completar cuando se asigne el proveedor), D10 y D13 (plan de pruebas y costos), además de D11 y D12 ([índice de ADRs](docs/adr/README.md)). Comprobantes tiene API, colas, persistencia de logs en MySQL y métricas HTTP. Prometheus y Grafana se aprovisionan con un dashboard inicial de métricas y logs. Los demás servicios se incorporan al `docker-compose.yml` a medida que se implementan.
-
-> En esta etapa todavía no hay una aplicación frontend ejecutable ni un API Gateway implementado. La interfaz web está documentada como diseño en [frontend/README.md](frontend/README.md); las pruebas locales se hacen contra la API de Comprobantes en `http://localhost:8081` o el mock Prism en `http://localhost:4010`.
+> **Estado (10/11/2026):** Catálogo (en capas, dos instancias, MongoDB + MySQL, caché Redis, búsqueda con OpenSearch, guías de Estudiario), Reservas (hexagonal: carrito, compra con recuperación, `CompraConfirmada`, guías) y Comprobantes (hexagonal) funcionan de punta a punta: una compra confirmada termina en la factura por correo. El frontend tiene todas las pantallas y por ahora usa datos de demostración (`FRONTEND_DATOS_FALSOS=true`). **Falta integrar en `main` el API Gateway y el servicio Usuarios**; hasta entonces, los servicios se prueban directo con los headers `X-Usuario-*` que pondría el gateway (ver el README de cada servicio). Tiempo Real (bonus) no está implementado. Decisiones: [índice de ADRs](docs/adr/README.md). Limitaciones: [ARCHITECTURE.md §9](docs/ARCHITECTURE.md#9-limitaciones-conocidas-y-deuda-técnica).
 
 ### Observabilidad local
 
-Prometheus recolecta las métricas HTTP de Comprobantes desde `/metrics` cada 5 segundos. Grafana aprovisiona automáticamente Prometheus y MySQL como fuentes de datos y el dashboard unificado **Agencia de Viajes - Observabilidad**:
-
-- Tasa de solicitudes HTTP, latencia p95 y respuestas 5xx usando `http_requests_total` y `http_request_duration_seconds`.
-- Total de solicitudes para el rango seleccionado.
-- Una tabla con hasta 100 logs recientes de `comprobantes.app_logs`, incluidos nivel, servicio, mensaje, `correlacion_id`, `trace_id` y metadatos.
-
-El dashboard se actualiza cada 5 segundos. Los logs se filtran por el rango de tiempo elegido en Grafana; MySQL se consulta con un usuario que solo tiene permiso `SELECT` sobre `app_logs`. La persistencia de logs en base de datos está implementada en Comprobantes; no implica que los servicios todavía no implementados ya estén instrumentados.
+Prometheus recolecta las métricas de Comprobantes, Reservas y las dos instancias de Catálogo desde `/metrics`. Grafana aprovisiona Prometheus y MySQL como fuentes de datos y el dashboard **Agencia de Viajes - Observabilidad**, con tasa de solicitudes, latencia p95, respuestas 5xx y los logs recientes (`app_logs` de cada servicio, con `correlacion_id` y `trace_id`). Las trazas de una compra se siguen en Jaeger a través de Reservas, RabbitMQ y Comprobantes.
 
 ### Código y tests
 
-El backend está en Go. Cada servicio es un módulo propio (`services/<servicio>/go.mod`) y `pkg/` es un módulo compartido con logs, correlación, métricas y trazas. El archivo `go.work` de la raíz los une para el editor y para correr todo junto:
+El backend está en Go. Cada servicio es un módulo propio (`services/<servicio>/go.mod`) y `pkg/` es un módulo compartido (observabilidad, mensajería con outbox y DLQ, y el adaptador de Estudiario). El archivo `go.work` de la raíz los une para el editor:
 
 ```bash
-go test ./pkg/... ./services/comprobantes/...
+cd services/catalogo && go test -short ./...   # unitarios, sin Docker (igual en reservas, comprobantes y pkg)
+cd services/catalogo && go test ./...          # + integración contra MySQL, MongoDB, RabbitMQ u OpenSearch reales (testcontainers)
+cd frontend && npm test
 ```
+
+Pruebas de carga (k6) en [`tests/carga/`](tests/carga/): resultados en [ADR-013](docs/adr/ADR-013-capacidad-y-costos.md).
 
 ## Bonus
 
@@ -84,7 +83,10 @@ Desafío elegido: **actualizaciones de información en tiempo real** ([ADR-015](
 
 ## Parte desplegada
 
-La capacidad publicada (API de Comprobantes) se desplegará en la nube con URL pública. _Pendiente: completar URL._
+La capacidad publicada (API de Comprobantes) se despliega en una VM en la nube con HTTPS: procedimiento en [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md), archivos en [`deploy/comprobantes/`](deploy/comprobantes/).
+
+- URL pública: `<COMPLETAR: https://…>`
+- Contrato y guía para el grupo consumidor: [docs/contracts/](docs/contracts/README.md)
 
 ## Documentación
 
@@ -93,7 +95,10 @@ La capacidad publicada (API de Comprobantes) se desplegará en la nube con URL p
 | [SPEC.md](SPEC.md) | Alcance, historias de usuario, reglas de negocio y criterios de aceptación |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arquitectura, diagramas, servicios y comunicaciones |
 | [docs/adr/](docs/adr/) | Registro de decisiones arquitectónicas |
-| [docs/contracts/](docs/contracts/) | Contrato versionado de la capacidad publicada |
+| [docs/contracts/](docs/contracts/) | Contrato versionado de la capacidad publicada, contrato consumido (Estudiario) y contrato interno de Catálogo |
+| [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md) | Despliegue de Comprobantes en la nube |
+| [docs/POSTMORTEM.md](docs/POSTMORTEM.md) | Análisis de caídas (provocadas y no planificadas) |
+| [docs/PLAN-DE-DESARROLLO.md](docs/PLAN-DE-DESARROLLO.md) | Reparto y estado del trabajo hasta la presentación |
 | [docs/devoluciones/](docs/devoluciones/) | Cambios pedidos en cada devolución de la cátedra y dónde se aplicaron |
 
 ## Forma de trabajo

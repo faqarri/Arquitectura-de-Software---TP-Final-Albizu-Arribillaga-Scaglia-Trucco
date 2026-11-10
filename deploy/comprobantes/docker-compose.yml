@@ -1,0 +1,91 @@
+# Despliegue en la nube de la API de Comprobantes (capacidad propia, ADR-008).
+# Solo lo que necesita Comprobantes: MySQL, RabbitMQ, el servicio y Caddy con
+# HTTPS delante. Procedimiento completo: docs/DESPLIEGUE.md.
+#
+#   cd deploy/comprobantes
+#   cp .env.example .env    # completar con valores reales (nunca se versiona)
+#   docker compose up -d --build
+#
+# Solo Caddy publica puertos (80 para el certificado y la redirección, 443 para
+# la API). MySQL, RabbitMQ y el puerto 8080 del servicio no salen de la VM.
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Definí MYSQL_ROOT_PASSWORD en .env}
+      # La imagen crea el esquema y un usuario con permisos solo sobre él (ADR-003).
+      MYSQL_DATABASE: comprobantes
+      MYSQL_USER: comprobantes
+      MYSQL_PASSWORD: ${COMPROBANTES_DB_PASSWORD:?Definí COMPROBANTES_DB_PASSWORD en .env}
+    # Una VM chica: se achica el buffer pool para que entre todo en 1-2 GB.
+    command: ["--innodb-buffer-pool-size=128M", "--performance-schema=OFF"]
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Definí RABBITMQ_USER en .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Definí RABBITMQ_PASSWORD en .env}
+    volumes: [rabbitmq-data:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  comprobantes:
+    build:
+      context: ../..
+      dockerfile: services/comprobantes/Dockerfile
+    environment:
+      GIN_MODE: release
+      PUERTO_HTTP: "8080"
+      DB_HOST: mysql
+      DB_PUERTO: "3306"
+      DB_USUARIO: comprobantes
+      DB_PASSWORD: ${COMPROBANTES_DB_PASSWORD}
+      DB_NOMBRE: comprobantes
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      SMTP_HOST: ${SMTP_HOST:?Definí SMTP_HOST en .env}
+      SMTP_PUERTO: ${SMTP_PUERTO:-587}
+      SMTP_USUARIO: ${SMTP_USUARIO:?Definí SMTP_USUARIO en .env}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?Definí SMTP_PASSWORD en .env}
+      SMTP_REMITENTE: ${SMTP_REMITENTE:?Definí SMTP_REMITENTE en .env}
+      # Claves fijas opcionales (grupo:clave,...). Las de los grupos se registran
+      # con POST /v1/api-keys y quedan en MySQL.
+      COMPROBANTES_API_KEYS: ${COMPROBANTES_API_KEYS:-}
+      HABILITAR_ENDPOINT_ERROR_PRUEBA: "false"
+    expose: ["8080"]
+    restart: unless-stopped
+    depends_on:
+      mysql: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  caddy:
+    image: caddy:2.8-alpine
+    environment:
+      # Nombre DNS que apunta a la IP pública de la VM. Sin dominio propio:
+      # <ip-con-guiones>.sslip.io (por ejemplo 203-0-113-10.sslip.io).
+      DOMINIO: ${DOMINIO:?Definí DOMINIO en .env}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    depends_on:
+      comprobantes: { condition: service_healthy }
+
+volumes:
+  mysql-data:
+  rabbitmq-data:
+  caddy-data:
+  caddy-config:
