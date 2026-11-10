@@ -44,6 +44,9 @@ type Oferta struct {
 	Precio            float64           `json:"precio"`
 	Publicada         bool              `json:"-"`
 	Version           int64             `json:"version"`
+	// ActualizadaEn es el instante de la última escritura: con él se mide el
+	// retraso de la búsqueda (ADR-006).
+	ActualizadaEn time.Time `json:"-"`
 	// Solo para administradores: cambian con cada venta, por eso no se cachean.
 	CupoTotal *int `json:"cupoTotal,omitempty"`
 	Vendidos  *int `json:"vendidos,omitempty"`

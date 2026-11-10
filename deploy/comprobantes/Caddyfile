@@ -1,0 +1,24 @@
+# Caddy obtiene y renueva solo el certificado de Let's Encrypt para DOMINIO y
+# redirige HTTP a HTTPS. Solo se publican la API (/v1/...) y /health.
+
+{$DOMINIO} {
+	encode gzip
+
+	# /metrics y cualquier otra ruta interna no salen a internet.
+	@publico path /v1/* /health
+	handle @publico {
+		reverse_proxy comprobantes:8080 {
+			# El servicio identifica al cliente por IP para el límite de solicitudes.
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	handle {
+		header Content-Type application/problem+json
+		respond `{"type":"about:blank","title":"No encontrado","status":404,"detail":"La API está en /v1. Contrato: docs/contracts/comprobantes/v1/openapi.yaml"}` 404
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

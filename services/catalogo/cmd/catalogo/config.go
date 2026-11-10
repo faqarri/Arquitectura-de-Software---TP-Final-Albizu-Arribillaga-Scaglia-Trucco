@@ -20,6 +20,8 @@ type config struct {
 	cacheHabilitada  bool
 	estudiarioURL    string
 	estudiarioAPIKey string
+	opensearchURL    string
+	aliasBusqueda    string
 	retencionMinutos int
 	maxPorOferta     int
 	intervaloBarrido time.Duration
@@ -54,6 +56,8 @@ func cargarConfig() (config, error) {
 		cacheHabilitada:  conDefecto("CACHE_HABILITADA", "true") == "true",
 		estudiarioURL:    conDefecto("ESTUDIARIO_URL", "http://estudiario-mock:4010"),
 		estudiarioAPIKey: os.Getenv("ESTUDIARIO_API_KEY"),
+		opensearchURL:    conDefecto("OPENSEARCH_URL", "http://localhost:9200"),
+		aliasBusqueda:    conDefecto("BUSQUEDA_ALIAS", "ofertas"),
 	}
 	var err error
 	if cfg.retencionMinutos, err = entero("RETENCION_MINUTOS", 15); err != nil {

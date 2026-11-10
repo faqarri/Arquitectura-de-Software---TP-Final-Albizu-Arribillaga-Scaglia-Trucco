@@ -63,6 +63,15 @@ func responderError(c *gin.Context, d Dependencias, err error) {
 			gin.H{"retencionIds": noVigentes.IDs})
 	case errors.Is(err, models.ErrNoEncontrado):
 		problema(c, http.StatusNotFound, models.CodigoNoEncontrado, "No encontrado", "")
+	case errors.Is(err, models.ErrBusquedaNoDisponible):
+		ctx := c.Request.Context()
+		observabilidad.Logger(ctx, d.Log).WarnContext(ctx, "la búsqueda no está disponible", "error", err)
+		c.Header("Retry-After", "5")
+		problema(c, http.StatusServiceUnavailable, models.CodigoBusquedaNoDisponible, "Búsqueda no disponible",
+			"La búsqueda no está disponible en este momento. Intentá de nuevo en unos segundos.")
+	case errors.Is(err, models.ErrReconstruccionEnCurso):
+		problema(c, http.StatusConflict, models.CodigoReconstruccionEnCurso, "Reconstrucción en curso",
+			"Ya hay una reconstrucción del índice corriendo en esta instancia.")
 	default:
 		ctx := c.Request.Context()
 		observabilidad.Logger(ctx, d.Log).ErrorContext(ctx, "no se pudo atender la solicitud", "error", err)

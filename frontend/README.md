@@ -41,7 +41,9 @@ npm run build    # verifica tipos y genera dist/
 
 ## Lo que espera de cada servicio
 
-Las rutas son las del plan (§3.1). Los formatos de **Reservas** son los reales ([README](../services/reservas/README.md)). Los de **Catálogo** y **Usuarios** son los que usa el frontend hasta que publiquen sus ejemplos, y están en [`src/api/tipos.ts`](src/api/tipos.ts). Si al implementarlos cambian, se ajusta ese archivo y [`src/api/real.ts`](src/api/real.ts).
+Las rutas son las del plan (§3.1). Los formatos de **Reservas** y de **Catálogo** son los reales: los de Catálogo (oferta, disponibilidad, packs, guías del destino y búsqueda, incluido `orden` con `fecha`, `-fecha`, `precio` y `-precio`) se compararon contra el servicio el 2026-11-10 y coinciden con [`src/api/tipos.ts`](src/api/tipos.ts). Los de **Usuarios** son los que usa el frontend hasta que el servicio esté en `main`. Si cambian, se ajusta ese archivo y [`src/api/real.ts`](src/api/real.ts).
+
+Además de los `code` de la tabla de errores, Catálogo puede responder `503 busqueda-no-disponible` (con `Retry-After`) si cae OpenSearch: el frontend lo trata como cualquier `503`, y el detalle, el carrito y la compra siguen funcionando.
 
 | Ruta | Respuesta que espera |
 |---|---|

@@ -100,12 +100,20 @@ func ejecutar(log *slog.Logger) error {
 	guias := services.NuevoGuias(ofertas,
 		estudiario.NuevoCliente(estudiario.Config{URL: cfg.estudiarioURL, APIKey: cfg.estudiarioAPIKey}), cache, log)
 
+	// OpenSearch: índice de búsqueda (ADR-006). Si no responde, solo la
+	// búsqueda devuelve 503; no cuenta para /health.
+	indice, err := repository.NuevoIndiceBusqueda(cfg.opensearchURL, cfg.aliasBusqueda)
+	if err != nil {
+		return err
+	}
+	busqueda := services.NuevoBusqueda(indice, ofertasRepo, log)
+
 	// Capa HTTP.
 	servidor := &http.Server{
 		Addr: ":" + cfg.puertoHTTP,
 		Handler: handlers.NuevoRouter(handlers.Dependencias{
 			Log: log, Instancia: cfg.instancia,
-			Ofertas: ofertas, Packs: packs, Retenciones: retenciones, Guias: guias,
+			Ofertas: ofertas, Packs: packs, Retenciones: retenciones, Guias: guias, Busqueda: busqueda,
 			VerificarSalud: func(ctx context.Context) error {
 				if err := sqlDB.PingContext(ctx); err != nil {
 					return fmt.Errorf("MySQL no responde: %w", err)
@@ -139,6 +147,14 @@ func ejecutar(log *slog.Logger) error {
 	g.Go(func() error { return events.IniciarPublicadorOfertas(ctx, cfg.rabbitURL, log, ofertasRepo) })
 	g.Go(func() error { return events.IniciarConsumidorCache(ctx, cfg.rabbitURL, log, ofertas) })
 	g.Go(func() error { return jobs.IniciarVencimiento(ctx, cfg.intervaloBarrido, log, retenciones) })
+	// El indexador arranca recién con el índice listo; hasta entonces los
+	// cambios esperan en la cola catalogo.indexacion.
+	g.Go(func() error {
+		if err := jobs.PrepararBusqueda(ctx, log, busqueda); err != nil {
+			return nil // ctx cancelado: el servicio se está apagando
+		}
+		return events.IniciarIndexador(ctx, cfg.rabbitURL, log, busqueda)
+	})
 
 	err = g.Wait()
 	log.Info("servicio detenido")

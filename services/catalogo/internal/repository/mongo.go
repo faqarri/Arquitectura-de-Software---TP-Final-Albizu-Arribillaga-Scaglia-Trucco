@@ -86,6 +86,7 @@ func (d docOferta) modelo() models.Oferta {
 		ID: d.ID, Tipo: models.TipoOferta(d.Tipo), SubtipoTransporte: models.SubtipoTransporte(d.SubtipoTransporte),
 		Titulo: d.Titulo, Descripcion: d.Descripcion, Destino: d.Destino, Origen: d.Origen,
 		Desde: d.Desde.UTC(), Hasta: d.Hasta.UTC(), Precio: d.Precio, Publicada: d.Publicada, Version: d.Version,
+		ActualizadaEn: d.ActualizadaEn.UTC(),
 	}
 }
 
@@ -220,6 +221,42 @@ func (r *Ofertas) MarcarPublicada(ctx context.Context, c models.CambioPendiente)
 		bson.D{{Key: "_id", Value: c.OfertaID}, {Key: "version", Value: c.Version}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "pendientePublicar", Value: false}}}})
 	return err
+}
+
+// Recorrer entrega todas las ofertas (publicadas o no) modificadas desde
+// "desde" (todas si es cero), en lotes ordenados por id. Lo usa la
+// reconstrucción del índice de búsqueda (ADR-006).
+func (r *Ofertas) Recorrer(ctx context.Context, desde time.Time, lote int, fn func([]models.Oferta) error) error {
+	filtro := bson.D{}
+	if !desde.IsZero() {
+		filtro = bson.D{{Key: "actualizadaEn", Value: bson.D{{Key: "$gte", Value: desde.UTC()}}}}
+	}
+	cur, err := r.col.Find(ctx, filtro, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}).SetBatchSize(int32(lote)))
+	if err != nil {
+		return fmt.Errorf("recorrer ofertas: %w", err)
+	}
+	defer cur.Close(ctx)
+	pendientes := make([]models.Oferta, 0, lote)
+	for cur.Next(ctx) {
+		var d docOferta
+		if err := cur.Decode(&d); err != nil {
+			return fmt.Errorf("leer oferta: %w", err)
+		}
+		pendientes = append(pendientes, d.modelo())
+		if len(pendientes) == lote {
+			if err := fn(pendientes); err != nil {
+				return err
+			}
+			pendientes = pendientes[:0]
+		}
+	}
+	if err := cur.Err(); err != nil {
+		return fmt.Errorf("recorrer ofertas: %w", err)
+	}
+	if len(pendientes) > 0 {
+		return fn(pendientes)
+	}
+	return nil
 }
 
 // ---------- Packs ----------

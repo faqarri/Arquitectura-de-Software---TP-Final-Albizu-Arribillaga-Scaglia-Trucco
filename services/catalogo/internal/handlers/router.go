@@ -22,6 +22,7 @@ type Dependencias struct {
 	Packs       *services.Packs
 	Retenciones *services.Retenciones
 	Guias       *services.Guias
+	Busqueda    *services.Busqueda
 	// VerificarSalud devuelve error si MySQL o MongoDB no responden. Redis no
 	// cuenta: una caída de la caché no saca la instancia del balanceo (ADR-007).
 	VerificarSalud func(context.Context) error
@@ -46,6 +47,7 @@ func NuevoRouter(d Dependencias) *gin.Engine {
 	r.GET("/health", salud(d))
 
 	api := r.Group("/api")
+	api.GET("/busqueda", buscar(d))
 	api.GET("/ofertas/:id", detalleOferta(d))
 	api.GET("/ofertas/:id/disponibilidad", disponibilidad(d))
 	api.GET("/ofertas/:id/guias", guiasDelDestino(d))
@@ -60,6 +62,7 @@ func NuevoRouter(d Dependencias) *gin.Engine {
 	in.POST("/retenciones", retener(d))
 	in.DELETE("/retenciones/:id", liberar(d))
 	in.POST("/retenciones/confirmacion", confirmar(d))
+	in.POST("/busqueda/reconstruccion", reconstruirIndice(d))
 
 	r.NoRoute(func(c *gin.Context) {
 		problema(c, http.StatusNotFound, "no-encontrado", "Recurso no encontrado", "La ruta no existe.")
