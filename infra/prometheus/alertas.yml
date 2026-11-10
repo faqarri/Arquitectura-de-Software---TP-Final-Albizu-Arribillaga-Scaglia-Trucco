@@ -1,0 +1,28 @@
+groups:
+  - name: agencia-observabilidad
+    interval: 15s
+    rules:
+      - alert: TasaErroresHTTPAlta
+        expr: |
+          (
+            sum(rate(http_requests_total{status_code=~"5.."}[1m]))
+            /
+            clamp_min(sum(rate(http_requests_total[1m])), 0.000001)
+          ) > 0.05
+        for: 1m
+        labels:
+          severity: warning
+          servicio: agencia
+        annotations:
+          summary: Tasa de errores HTTP 5xx superior al 5 %
+          description: La tasa global de respuestas HTTP 5xx superó el 5 % durante al menos un minuto.
+
+      - alert: InstanciaCatalogoFueraDelPool
+        expr: gateway_instancia_sana{instancia=~"catalogo-.*"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          servicio: catalogo
+        annotations:
+          summary: Una instancia de Catálogo está fuera del pool
+          description: La instancia {{ $labels.instancia }} no está saludable y fue retirada del balanceo.
