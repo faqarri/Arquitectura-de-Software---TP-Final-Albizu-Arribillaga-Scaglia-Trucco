@@ -1,32 +1,44 @@
 # API Gateway
 
-Punto de entrada único del sistema.
+Gateway HTTP propio en Go; escucha en el puerto `8080` y es el único servicio de aplicación publicado al host. Comprueba JWT HS256, autoriza las rutas por rol, elimina los headers `X-Usuario-*` que mande el cliente y, en rutas autenticadas, los vuelve a crear a partir de los claims validados. Propaga `X-Correlation-Id` y `traceparent`, aplica rate limiting y publica métricas Prometheus.
 
-**Responsabilidades:** validación de JWT emitidos por Usuarios, ruteo hacia los servicios, rate limiting, balanceo de carga entre instancias con verificación de disponibilidad, propagación del `X-Correlation-Id`.
+## Rutas
 
-**Rutas previstas:**
+Las rutas no se reescriben: el gateway conserva `/api` al enviar cada request al servicio.
 
-| Prefijo | Servicio | Notas |
+| Ruta | Servicio | Acceso |
 |---|---|---|
-| `/api/auth`, `/api/usuarios` | Usuarios | |
-| `/api/ofertas`, `/api/packs`, `/api/busqueda` | Catálogo | Incluye `GET /api/ofertas/{id}/disponibilidad` |
-| `/api/carrito`, `/api/compras` | Reservas | Requieren JWT |
-| `/api/tiempo-real/ofertas` | Tiempo Real | **SSE**, pública |
-| `/api/tiempo-real/mis-retenciones` | Tiempo Real | **SSE**, requiere JWT; el gateway propaga el id de usuario |
+| `POST /api/usuarios`, `POST /api/sesiones` | Usuarios | Público |
+| `GET /api/busqueda`, `GET /api/ofertas`, `GET /api/ofertas/{id}`, `GET /api/ofertas/{id}/disponibilidad`, `GET /api/ofertas/{id}/guias`, `GET /api/packs[/{id}]` | Catálogo | Público |
+| `POST /api/ofertas`, `PUT/DELETE /api/ofertas/{id}`, `POST /api/packs` | Catálogo | `admin` |
+| `/api/carrito`, `/api/compras`, `/api/guias` | Reservas | `cliente` |
+| `GET /api/tiempo-real/ofertas` | Tiempo Real | Público, si se configura |
+| `GET /api/tiempo-real/mis-retenciones` | Tiempo Real | `cliente`, si se configura |
+| `/health`, `/metrics` | Gateway | Público |
 
-**Identidad hacia los servicios:** en las rutas que requieren JWT, el gateway valida el token y propaga sus claims en headers: `X-Usuario-Id`, `X-Usuario-Email` y `X-Usuario-Rol`. Antes de hacerlo **elimina cualquiera de esos headers que venga del cliente**, así nadie puede hacerse pasar por otro usuario enviándolos a mano. Los servicios confían en esos headers porque solo son accesibles desde la red interna.
+`/internal/*` y las rutas que no estén en esta tabla responden `404`. Comprobantes no se enruta por este gateway ([ADR-008](../docs/adr/ADR-008-contrato-propio.md)).
 
-**Rutas que NO se publican:** `/internal/*` de Catálogo (retener, liberar y confirmar retenciones). Solo Reservas las usa dentro de la red interna; el gateway responde `404` a cualquier ruta `/internal`.
+**Límite inicial:** `GATEWAY_RATE_LIMIT_POR_MINUTO` (por defecto 120) por usuario autenticado o IP para rutas públicas, con ráfaga de hasta 20 requests. SSE solo se enruta cuando `TIEMPO_REAL_URL` está configurada; su límite por conexiones abiertas queda pendiente del servicio bonus.
 
-**Requisitos de las rutas SSE (`/api/tiempo-real/*`):**
+## Ejecución local
 
-- Sin buffering de respuesta, para que los eventos lleguen al navegador al instante.
-- Timeout de lectura largo (las conexiones duran minutos; el servicio envía un *heartbeat* cada 20 s).
-- Rate limiting por **cantidad de conexiones abiertas** por cliente, no por solicitudes por minuto.
-- Preferentemente HTTP/2, para no agotar el límite de conexiones por dominio del navegador.
+```sh
+docker compose up -d --build gateway usuarios reservas
+curl http://localhost:8080/health
+curl -i -X POST http://localhost:8080/api/usuarios \
+  -H 'Content-Type: application/json' \
+  -d '{"nombre":"Ana Pérez","email":"ana@example.com","password":"una-clave-segura"}'
+curl -i -X POST http://localhost:8080/api/sesiones \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ana@example.com","password":"una-clave-segura"}'
+```
 
-La API pública de Comprobantes para otros grupos se expone en su propio despliegue (ver ADR-008).
+Configurar `JWT_SECRET` con al menos 32 caracteres (por ejemplo, generar uno con `openssl rand -hex 32`); Usuarios y Gateway usan exactamente el mismo secreto. `USUARIOS_ADMIN_EMAIL` y `USUARIOS_ADMIN_PASSWORD` son opcionales y deben definirse juntas. El límite se configura con `GATEWAY_RATE_LIMIT_POR_MINUTO`. En Compose, las URLs de Usuarios y Reservas usan los nombres internos. `GATEWAY_CATALOGO_INSTANCIAS` recibe las URLs de Catálogo separadas por coma; `TIEMPO_REAL_URL` es opcional.
 
-**Tecnología:** a definir (candidatos: Traefik, Nginx o un gateway en Go). Debe cumplir los requisitos de SSE anteriores.
+El Compose no publica los puertos de Usuarios ni Reservas: así no se puede evitar el control de identidad del gateway. Los servicios `catalogo-1` y `catalogo-2` se configuran como upstreams de forma predeterminada en `.env.example`. Si se despliega el Gateway sin esas instancias, las rutas de Catálogo responderán `503`.
 
-**Historial:** 2026-10-22: se agregan las rutas SSE de Tiempo Real y la disponibilidad, se excluyen explícitamente las rutas `/internal` y se quita `/api/sugerencias` (sugerencias fuera del alcance). 2026-10-22: se definen los headers de identidad (`X-Usuario-Id`, `X-Usuario-Email`, `X-Usuario-Rol`) que el gateway propaga a partir del JWT ([ADR-014 § Revisiones](../docs/adr/ADR-014-cupos-en-catalogo-con-retencion.md#revisiones)).
+## Estado de implementación
+
+Incluye autenticación/autorización, limpieza y propagación de identidad, reverse proxy, límite de solicitudes, health, métricas y logs/trazas. El pool de Catálogo distribuye entre `catalogo-1` y `catalogo-2` con round robin y health checks cada 5 s; retira tras 3 fallas y reincorpora tras 2 éxitos, con métricas por instancia. El dashboard muestra tráfico por upstream, salud, métricas de caché y alertas. Prometheus define `TasaErroresHTTPAlta` (>5 % 5xx por 1 min) e `InstanciaCatalogoFueraDelPool` (fuera por 1 min), visibles desde Grafana. La caída y recuperación de `catalogo-2` se probaron en ejecución local; falta probar la alerta global de 5xx bajo carga. El streaming y la limitación de conexiones SSE quedan para cuando exista Tiempo Real ([ADR-012](../docs/adr/ADR-012-balanceo-de-carga.md)).
+
+**Historial:** 2026-10-22: se documentan headers de identidad y se excluyen rutas internas. 2026-11-09: primera implementación del Gateway Go para Usuarios y Reservas; Catálogo se enruta a una URL configurable. 2026-11-10: integración con las dos instancias de Catálogo en Compose.

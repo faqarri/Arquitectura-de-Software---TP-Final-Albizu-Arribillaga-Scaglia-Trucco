@@ -55,7 +55,9 @@ El span HTTP lo genera `otelgin` dentro de `MiddlewareGin`; GORM instrumenta con
 
 ### Métricas y tablero
 
-Prometheus recolecta las métricas y Grafana las visualiza junto con los logs consultados desde MySQL. Comprobantes expone `/metrics` con `http_requests_total` y `http_request_duration_seconds`, etiquetadas por método, ruta normalizada y código HTTP; Prometheus hace scraping cada 5 segundos. Grafana aprovisiona ambas fuentes y el dashboard **Agencia de Viajes - Observabilidad**, que muestra tasa de solicitudes, latencia p95, total de solicitudes y errores 5xx, además de los últimos 100 logs de `comprobantes.app_logs` dentro del rango de tiempo seleccionado. La cuenta MySQL configurada en Grafana tiene permiso `SELECT` únicamente sobre esa tabla.
+Prometheus recolecta las métricas y Grafana las visualiza junto con los logs consultados desde MySQL. Comprobantes, Reservas y Usuarios exponen `/metrics` con `http_requests_total` y `http_request_duration_seconds`, etiquetadas por método, ruta normalizada y código HTTP; Prometheus hace scraping cada 5 segundos. El Gateway expone sus propias métricas HTTP más `gateway_solicitudes_total{instancia,ruta,estado}` y `gateway_instancia_sana{instancia}`. Grafana aprovisiona ambas fuentes y el dashboard **Agencia de Viajes - Observabilidad**, que muestra tasa de solicitudes, latencia p95, total de solicitudes y errores 5xx, logs de `comprobantes.app_logs`, tráfico del Gateway por upstream, salud de Catálogo y disponibilidad de los targets scrapeados.
+
+Prometheus evalúa reglas cada 15 segundos: una alerta de tasa HTTP 5xx superior al 5 % sostenida por un minuto y otra cuando una instancia de Catálogo permanece fuera del pool durante un minuto. Grafana consulta y presenta las reglas y su estado desde la fuente Prometheus.
 
 Las métricas de negocio iniciales propuestas para los servicios son:
 
@@ -68,12 +70,12 @@ Las métricas de negocio iniciales propuestas para los servicios son:
 | Reservas | Carritos y compras por estado, compras `PENDIENTE` y duración de recuperación |
 | Tiempo Real | Conexiones SSE abiertas, eventos publicados/entregados y reconexiones |
 
-El dashboard implementado es una primera vista de Comprobantes. La salud y el tráfico por instancia, la antigüedad del outbox, la profundidad de colas/DLQ, el estado y la demora de envíos y los enlaces a trazas quedan para integrar cuando estén disponibles las métricas correspondientes.
+El dashboard y las alertas son una primera vista. La antigüedad del outbox, la profundidad de colas/DLQ, el estado y la demora de envíos y los enlaces a trazas quedan para integrar cuando estén disponibles las métricas correspondientes. Los paneles y la alerta de Catálogo requieren que Albizu integre sus instancias y que el Gateway reciba sus URLs; mientras no haya targets, Grafana no inventa su estado.
 
 ### Objetivos y alertas iniciales
 
 - **Objetivo de servicio:** al menos el 99 % de los `POST /v1/comprobantes` responde en menos de 500 ms; al menos el 95 % de los correos termina en `ENVIADO` dentro del minuto posterior a la emisión. Se medirá sobre ventanas móviles de 30 días cuando haya datos suficientes; hasta entonces se reportan los resultados de las pruebas.
-- **Alertas:** cualquier mensaje presente en una `.dlq`; tasa de respuestas 5xx superior al 5 % durante 5 minutos; cualquier instancia fuera de salud durante más de 1 minuto. También se observa el outbox más antiguo y los envíos que superen el objetivo de un minuto.
+- **Alertas:** cualquier mensaje presente en una `.dlq`; tasa de respuestas 5xx superior al 5 % durante 1 minuto; cualquier instancia fuera de salud durante más de 1 minuto. También se observa el outbox más antiguo y los envíos que superen el objetivo de un minuto.
 
 ## Alternativas consideradas
 
@@ -89,18 +91,20 @@ El dashboard implementado es una primera vista de Comprobantes. La salud y el tr
 - (+) Comprobantes mantiene los logs JSON en stdout y los persiste de forma asíncrona en `app_logs`; la cola acotada evita que un fallo de persistencia de logs bloquee las solicitudes de negocio.
 - (+) Grafana usa una cuenta MySQL con permiso `SELECT` únicamente sobre `comprobantes.app_logs`.
 - (+) El dashboard inicial de Grafana unifica la tasa y latencia de solicitudes HTTP con los logs recientes de Comprobantes.
-- (−) Faltan alertas automatizadas y métricas de negocio, colas, outbox y salud por instancia.
+- (−) Faltan métricas de negocio, colas y outbox; las reglas de alerta están implementadas pero falta demostrar su disparo con tráfico y con la caída real de una réplica.
 - (−) La propagación del publicador debe conservarse al integrar cambios posteriores de RabbitMQ; hoy se persisten y reenvían los headers, pero falta un span específico de productor.
 - (−) Los objetivos iniciales se deben validar con pruebas de carga y datos observados antes de tratarlos como SLO comprometidos.
 
 ## Implementación
 
-**Implementado:** logs JSON con `slog`, correlación HTTP, `trace_id`/`span_id`, persistencia asíncrona de logs de Comprobantes en MySQL, usuario de consulta de solo lectura para Grafana, SDK y propagación W3C, spans HTTP y GORM, span de consumidor, exportación OTLP/HTTP a Jaeger, middleware de métricas HTTP, scraping de Prometheus cada 5 segundos y dashboard de Grafana aprovisionado con métricas y logs.
+**Implementado:** logs JSON con `slog`, correlación HTTP, `trace_id`/`span_id`, persistencia asíncrona de logs de Comprobantes en MySQL, usuario de consulta de solo lectura para Grafana, SDK y propagación W3C, spans HTTP y GORM, span de consumidor, exportación OTLP/HTTP a Jaeger, middleware de métricas HTTP en Comprobantes/Reservas/Usuarios/Gateway, scraping de Prometheus cada 5 segundos, reglas Prometheus consultables en Grafana y dashboard aprovisionado con métricas, logs, salud por instancia y targets.
 
-**Pendiente:** alertas automatizadas, métricas de negocio en los servicios que se implementen y span propio del publicador de outbox.
+**Pendiente:** validar en vivo la alerta global de tasa 5xx; métricas de negocio/colas/outbox en los servicios respectivos; span propio del publicador de outbox. La alerta de instancia fuera del pool ya se verificó con la caída real de `catalogo-2`.
 
 ## Revisiones
 
 - **2026-10-28:** Se agrega persistencia asíncrona y acotada de logs de Comprobantes en MySQL, con correlación y traza; Grafana consulta `app_logs` usando un usuario limitado a `SELECT`. Se actualiza el estado de Prometheus/Grafana para reflejar el middleware y el aprovisionamiento local ya incorporados; el dashboard y las alertas siguen pendientes.
 - **2026-10-28:** Se aprovisiona el dashboard unificado de Grafana con tasa, latencia p95, total de solicitudes, errores HTTP 5xx y logs recientes de `comprobantes.app_logs`. Se actualizan el contexto, las consecuencias y el estado de implementación para reflejar el dashboard disponible; las alertas y métricas de negocio siguen pendientes.
 - **2026-11-09:** El panel de logs pasa a mostrar los de Comprobantes, Reservas y Catálogo (unión de las tres tablas `app_logs`); el usuario `grafana` sigue limitado a `SELECT` sobre esas tres tablas, que ahora crea `01-esquemas.sql` para poder dar el permiso en el primer arranque. Se agregan paneles de Catálogo: solicitudes por instancia y estado de cada instancia (`up`), para ver el balanceo (ADR-012), y tasa de aciertos, latencia p95 del detalle por origen y errores y corte de Redis, para la caché (ADR-007). Prometheus mide `catalogo-1` y `catalogo-2`. Quien tenga el volumen de MySQL de antes debe crear el usuario o los permisos a mano, o recrear el volumen con `docker compose down -v`. Las alertas siguen pendientes.
+- **2026-11-09:** Se amplía el scraping a Usuarios y Gateway; se agregan en Grafana los paneles de tráfico upstream, salud de Catálogo, disponibilidad de targets y alertas activas. Se aprovisionan reglas para 5xx > 5 % durante 1 minuto y para instancias de Catálogo fuera del pool durante 1 minuto; `promtool check rules` y `promtool test rules` validan sintaxis y disparo con series sintéticas. La verificación con una caída real y el resto de métricas de negocio quedan pendientes de la integración de Catálogo y de la prueba de carga.
+- **2026-11-10:** Se integran las dos instancias reales de Catálogo al Compose, al scraping y al pool round robin del Gateway. El dashboard unifica logs de Comprobantes, Reservas y Catálogo, salud y tráfico del pool, targets, alertas y métricas de caché. El ensayo real confirmó que la alerta de instancia fuera del pool dispara y que la réplica se recupera; falta validar en vivo la alerta global de tasa 5xx.

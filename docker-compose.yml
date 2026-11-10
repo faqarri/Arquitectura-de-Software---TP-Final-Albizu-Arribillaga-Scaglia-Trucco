@@ -111,6 +111,7 @@ services:
     ports: ["9090:9090"]
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alertas.yml:/etc/prometheus/alertas.yml:ro
       - prometheus-data:/prometheus
     depends_on:
       comprobantes: { condition: service_started }
@@ -189,8 +190,7 @@ services:
       # El mock acepta cualquier clave; para el servicio real va la que entrega el Grupo 2.
       ESTUDIARIO_API_KEY: ${ESTUDIARIO_API_KEY:-clave-para-el-mock}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
-    # Sin puerto publicado: se accede por el gateway. Para probar sin gateway: 8082.
-    ports: ["8082:8080"]
+    # Solo accesible desde la red interna; el gateway es la entrada pública.
     restart: on-failure
     depends_on:
       mysql: { condition: service_healthy }
@@ -219,6 +219,48 @@ services:
         aliases: [catalogo]
     ports: ["8084:8080"]
 
+  usuarios:
+    build:
+      context: .
+      dockerfile: services/usuarios/Dockerfile
+    environment:
+      GIN_MODE: release
+      PUERTO_HTTP: "8080"
+      DB_HOST: mysql
+      DB_PUERTO: "3306"
+      DB_USUARIO: usuarios
+      DB_PASSWORD: ${USUARIOS_DB_PASSWORD}
+      DB_NOMBRE: usuarios
+      JWT_SECRET: ${JWT_SECRET:?Definí JWT_SECRET en .env (mínimo 32 caracteres)}
+      USUARIOS_ADMIN_EMAIL: ${USUARIOS_ADMIN_EMAIL:-}
+      USUARIOS_ADMIN_PASSWORD: ${USUARIOS_ADMIN_PASSWORD:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    # Solo accesible desde la red interna; el gateway es la entrada pública.
+    restart: on-failure
+    depends_on:
+      mysql: { condition: service_healthy }
+      jaeger: { condition: service_started }
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      GIN_MODE: release
+      JWT_SECRET: ${JWT_SECRET:?Definí JWT_SECRET en .env (mínimo 32 caracteres)}
+      USUARIOS_URL: http://usuarios:8080
+      RESERVAS_URL: http://reservas:8080
+      CATALOGO_INSTANCIAS: ${GATEWAY_CATALOGO_INSTANCIAS:-}
+      TIEMPO_REAL_URL: ${TIEMPO_REAL_URL:-}
+      GATEWAY_RATE_LIMIT_POR_MINUTO: ${GATEWAY_RATE_LIMIT_POR_MINUTO:-120}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    ports: ["8080:8080"]
+    restart: on-failure
+    depends_on:
+      usuarios: { condition: service_healthy }
+      reservas: { condition: service_healthy }
+      jaeger: { condition: service_started }
+
   # Mock de la API interna de retenciones de Catálogo (docs/contracts/internos/).
   # Sirve para probar Reservas sin Catálogo (CATALOGO_URL=http://catalogo-mock:4010).
   catalogo-mock:
@@ -237,7 +279,7 @@ services:
     ports: ["4030:4010"]
 
   # Frontend (React + Vite) servido por nginx, que deriva /api al gateway.
-  # Mientras el gateway no exista usa datos de demostración (FRONTEND_DATOS_FALSOS=false para el gateway).
+  # La búsqueda con OpenSearch aún está pendiente; los datos falsos mantienen disponible la demo del frontend.
   frontend:
     build:
       context: ./frontend
@@ -248,8 +290,6 @@ services:
     ports: ["5173:80"]
 
   # --- Servicios que se habilitan a medida que se implementan ---
-  # gateway:      { build: ./gateway, ports: ["8080:8080"], env_file: .env }
-  # usuarios:     { build: ./services/usuarios, env_file: .env, depends_on: [mysql] }
   # tiempo-real:  { build: ./services/tiempo-real, env_file: .env, depends_on: [rabbitmq] }  # sin estado, SSE vía gateway (ADR-015)
 
 volumes:

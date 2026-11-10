@@ -1,6 +1,9 @@
 global:
   scrape_interval: 5s
 
+rule_files:
+  - /etc/prometheus/alertas.yml
+
 scrape_configs:
   - job_name: comprobantes
     metrics_path: /metrics
@@ -20,3 +23,13 @@ scrape_configs:
       - targets:
           - catalogo-1:8080
           - catalogo-2:8080
+  - job_name: usuarios
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - usuarios:8080
+  - job_name: gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - gateway:8080
