@@ -6,7 +6,7 @@
 
 ## Contexto
 
-El flujo principal atraviesa HTTP, MySQL, el outbox, RabbitMQ y el envío SMTP. Para poder explicar una demora o falla necesitamos correlacionar logs y seguir una operación entre procesos. Además, la entrega requiere una primera traza distribuida; las métricas y el tablero quedan como propuesta para completar la observabilidad.
+El flujo principal atraviesa HTTP, MySQL, el outbox, RabbitMQ y el envío SMTP. Para poder explicar una demora o falla necesitamos correlacionar logs y seguir una operación entre procesos. La observabilidad local combina logs estructurados, métricas Prometheus, trazas distribuidas y visualización en Grafana; en esta etapa la instrumentación de métricas y persistencia de logs están implementadas en Comprobantes.
 
 ## Decisión
 
@@ -53,9 +53,11 @@ Jaeger es el backend local elegido para recibir OTLP/HTTP (puerto 4318) y explor
 
 El span HTTP lo genera `otelgin` dentro de `MiddlewareGin`; GORM instrumenta consultas SQL; `ProcesarMensaje` crea spans consumidores y marca los errores. El flujo comparte el contexto aunque el publicador no tenga todavía un span propio: al integrarlo, deberá crear su span de productor usando el contexto recuperado del outbox.
 
-### Métricas y tablero (propuesta)
+### Métricas y tablero
 
-Se propone Prometheus para recolectar métricas y Grafana para el tablero. Las métricas iniciales por servicio son:
+Prometheus recolecta las métricas y Grafana las visualiza junto con los logs consultados desde MySQL. Comprobantes expone `/metrics` con `http_requests_total` y `http_request_duration_seconds`, etiquetadas por método, ruta normalizada y código HTTP; Prometheus hace scraping cada 5 segundos. Grafana aprovisiona ambas fuentes y el dashboard **Agencia de Viajes - Observabilidad**, que muestra tasa de solicitudes, latencia p95, total de solicitudes y errores 5xx, además de los últimos 100 logs de `comprobantes.app_logs` dentro del rango de tiempo seleccionado. La cuenta MySQL configurada en Grafana tiene permiso `SELECT` únicamente sobre esa tabla.
+
+Las métricas de negocio iniciales propuestas para los servicios son:
 
 | Servicio/componente | Métricas propuestas |
 |---|---|
@@ -66,7 +68,7 @@ Se propone Prometheus para recolectar métricas y Grafana para el tablero. Las m
 | Reservas | Carritos y compras por estado, compras `PENDIENTE` y duración de recuperación |
 | Tiempo Real | Conexiones SSE abiertas, eventos publicados/entregados y reconexiones |
 
-El tablero de la presentación mostrará: tasa y latencia HTTP (incluidos 5xx), salud y tráfico por instancia, antigüedad del outbox y profundidad de colas/DLQ, estado y demora de envíos, y un enlace de una traza representativa en Jaeger.
+El dashboard implementado es una primera vista de Comprobantes. La salud y el tráfico por instancia, la antigüedad del outbox, la profundidad de colas/DLQ, el estado y la demora de envíos y los enlaces a trazas quedan para integrar cuando estén disponibles las métricas correspondientes.
 
 ### Objetivos y alertas iniciales
 
@@ -84,12 +86,20 @@ El tablero de la presentación mostrará: tasa y latencia HTTP (incluidos 5xx), 
 - (+) Logs, solicitudes y mensajes se pueden relacionar con identificadores estables.
 - (+) Las consultas a MySQL quedan asociadas al span HTTP y los consumidores pueden continuar el contexto.
 - (+) Jaeger puede levantarse junto con el entorno local y no requiere una cuenta externa.
-- (−) Prometheus, Grafana y las métricas de negocio aún no están desplegados.
+- (+) Comprobantes mantiene los logs JSON en stdout y los persiste de forma asíncrona en `app_logs`; la cola acotada evita que un fallo de persistencia de logs bloquee las solicitudes de negocio.
+- (+) Grafana usa una cuenta MySQL con permiso `SELECT` únicamente sobre `comprobantes.app_logs`.
+- (+) El dashboard inicial de Grafana unifica la tasa y latencia de solicitudes HTTP con los logs recientes de Comprobantes.
+- (−) Faltan alertas automatizadas y métricas de negocio, colas, outbox y salud por instancia.
 - (−) La propagación del publicador debe conservarse al integrar cambios posteriores de RabbitMQ; hoy se persisten y reenvían los headers, pero falta un span específico de productor.
 - (−) Los objetivos iniciales se deben validar con pruebas de carga y datos observados antes de tratarlos como SLO comprometidos.
 
 ## Implementación
 
-**Implementado:** logs JSON con `slog`, correlación HTTP, `trace_id`/`span_id`, SDK y propagación W3C, spans HTTP y GORM, span de consumidor, exportación OTLP/HTTP a Jaeger.
+**Implementado:** logs JSON con `slog`, correlación HTTP, `trace_id`/`span_id`, persistencia asíncrona de logs de Comprobantes en MySQL, usuario de consulta de solo lectura para Grafana, SDK y propagación W3C, spans HTTP y GORM, span de consumidor, exportación OTLP/HTTP a Jaeger, middleware de métricas HTTP, scraping de Prometheus cada 5 segundos y dashboard de Grafana aprovisionado con métricas y logs.
 
-**Pendiente:** Prometheus, Grafana, instrumentación de métricas, alertas automatizadas y span propio del publicador de outbox.
+**Pendiente:** alertas automatizadas, métricas de negocio en los servicios que se implementen y span propio del publicador de outbox.
+
+## Revisiones
+
+- **2026-10-28:** Se agrega persistencia asíncrona y acotada de logs de Comprobantes en MySQL, con correlación y traza; Grafana consulta `app_logs` usando un usuario limitado a `SELECT`. Se actualiza el estado de Prometheus/Grafana para reflejar el middleware y el aprovisionamiento local ya incorporados; el dashboard y las alertas siguen pendientes.
+- **2026-10-28:** Se aprovisiona el dashboard unificado de Grafana con tasa, latencia p95, total de solicitudes, errores HTTP 5xx y logs recientes de `comprobantes.app_logs`. Se actualizan el contexto, las consecuencias y el estado de implementación para reflejar el dashboard disponible; las alertas y métricas de negocio siguen pendientes.

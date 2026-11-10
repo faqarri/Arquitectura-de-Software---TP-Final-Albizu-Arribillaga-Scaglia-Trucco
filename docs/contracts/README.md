@@ -4,7 +4,9 @@
 
 | Versión | Estado | Contrato | URL |
 |---|---|---|---|
-| 1.0.2 | **Vigente** (mock disponible, implementación en curso) | [comprobantes/v1/openapi.yaml](comprobantes/v1/openapi.yaml) | Producción: _pendiente_ · Mock: `http://localhost:4010/v1` |
+| 1.1.0 | **Vigente** (implementada) | [comprobantes/v1/openapi.yaml](comprobantes/v1/openapi.yaml) | Producción: `<COMPLETAR: URL pública>/v1` · Mock: `http://localhost:4010/v1` |
+
+**¿Vas a integrar la API en tu proyecto?** Seguí la [guía de integración](comprobantes/v1/GUIA-INTEGRACION.md), que explica paso a paso cómo obtener la API Key y dónde ubicarla.
 
 Decisión y justificación: [ADR-008](../adr/ADR-008-contrato-propio.md).
 
@@ -16,6 +18,7 @@ Le mandás el **email** de tu cliente y la **lista de ítems** que vendiste (des
 
 | Operación | Método y ruta | Descripción |
 |---|---|---|
+| Obtener API Key | `POST /v1/api-keys` | Genera una API Key para tu grupo y la envía al email que indiques. Sin autenticación |
 | Emitir comprobante | `POST /v1/comprobantes` | Genera la factura y encola su envío por correo. Requiere `Idempotency-Key` |
 | Obtener comprobante | `GET /v1/comprobantes/{id}` | Datos del comprobante y estado del envío por correo |
 
@@ -59,7 +62,26 @@ Para saber cómo terminó, consultá `GET /v1/comprobantes/{id}`.
 
 ### Autenticación
 
-Todas las solicitudes llevan el header `X-API-Key`. Cada grupo consumidor recibe su clave por un canal privado (nunca se publica en repositorios).
+Las solicitudes a `/v1/comprobantes` llevan el header `X-API-Key`. Cada grupo genera la suya:
+
+```bash
+curl -X POST <URL>/v1/api-keys \
+  -H "Content-Type: application/json" \
+  -d '{ "grupo": "grupo-7", "email": "contacto@grupo7.example" }'
+```
+
+| Campo | Reglas |
+|---|---|
+| `grupo` | Entre 3 y 50 caracteres: minúsculas, números y guiones (por ejemplo, `grupo-7`). Separa tus comprobantes de los de otros grupos |
+| `email` | Un email del grupo. **Ahí llega la API Key** |
+
+- Responde `202` y la clave llega **por correo**, nunca en la respuesta. Así se comprueba que el email es del grupo.
+- El primer registro asocia el grupo con ese email. Si perdés la clave, pedí otra con **el mismo grupo y el mismo email**: llega una nueva y las anteriores siguen funcionando.
+- El mismo grupo con otro email responde `409`.
+- Límite: 5 registros válidos por hora por IP.
+- Guardá la clave en la configuración de tu proyecto (por ejemplo, en tu `.env`), nunca en un repositorio.
+
+Paso a paso, con dónde ubicar la clave: [guía de integración](comprobantes/v1/GUIA-INTEGRACION.md).
 
 ### Idempotencia
 
@@ -82,7 +104,7 @@ Formato `application/problem+json` (RFC 9457).
 | 400 | Cuerpo inválido según el esquema (incluye campos no definidos) | No, corregir la solicitud |
 | 401 | API Key ausente o inválida | No |
 | 404 | Comprobante inexistente | No |
-| 409 | Idempotency-Key reutilizada con otro cuerpo | No, usar clave nueva |
+| 409 | Idempotency-Key reutilizada con otro cuerpo, o (en `/v1/api-keys`) grupo ya registrado con otro email | No, usar otra clave o el email original |
 | 422 | Regla incumplida: el total es cero, o un precio o el total superan 9999999999.99 | No |
 | 429 | Límite de solicitudes superado | Sí, tras `Retry-After` |
 | 503 | No disponible temporalmente | Sí, con la **misma** Idempotency-Key |
@@ -90,6 +112,7 @@ Formato `application/problem+json` (RFC 9457).
 ### Condiciones de uso
 
 - Límite tentativo: 60 solicitudes por minuto por API Key.
+- Registro de API Keys: 5 por hora por IP.
 - Timeout recomendado para el consumidor: 5 s.
 
 ### Ejemplo
@@ -156,3 +179,4 @@ Rige desde la versión 1.0.0.
 | 2026-10-22 | 1.0.0 | Simplificación pedida en la devolución de la Entrega 1: el consumidor envía solo `email` e `items` (`descripcion`, `precio` en ARS) y el correo se envía **siempre**. Se quitan datos del cliente, cantidad, moneda, `enviarPorCorreo`, `referenciaExterna`, el estado `NO_SOLICITADO` y el endpoint de descarga de PDF. Las rutas incluyen `/v1` en el contrato. Se reemplazó el borrador **sin abrir `/v2`** porque ningún grupo lo consumía todavía (la cátedra aún no asignó consumidor); por eso no existía compatibilidad que preservar. Ver revisión en [ADR-008](../adr/ADR-008-contrato-propio.md#revisiones). |
 | 2026-10-22 | 1.0.1 | Se documenta el redondeo: los precios con más de 2 decimales se redondean a 2 (el 5 hacia arriba), la respuesta devuelve los precios redondeados y el total es su suma. No cambia el esquema ni se rechaza ninguna solicitud que antes fuera válida. |
 | 2026-10-23 | 1.0.2 | Se documenta el importe máximo: un precio o un total mayor a 9999999999.99 responde `422`. Esas solicitudes ya fallaban antes (no entran en el almacenamiento), pero con un `503` que invitaba a reintentar sin sentido. No cambia el esquema. |
+| 2026-10-30 | 1.1.0 | Nueva operación `POST /v1/api-keys`: cada grupo genera su propia API Key indicando su nombre de grupo y su email, y la recibe por correo. Antes la clave se entregaba por un canal privado. Es un cambio compatible: las operaciones existentes no cambian. Se agrega la [guía de integración](comprobantes/v1/GUIA-INTEGRACION.md). Ver revisión en [ADR-008](../adr/ADR-008-contrato-propio.md#revisiones). |

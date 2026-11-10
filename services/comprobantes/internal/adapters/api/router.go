@@ -21,13 +21,17 @@ type Dependencias struct {
 	Log     *slog.Logger
 	Emitir  *application.EmitirComprobante
 	Obtener *application.ObtenerComprobante
-	// APIKeys asocia cada API Key con el nombre del grupo consumidor.
-	APIKeys map[string]string
+	// Autenticar resuelve el grupo consumidor de cada X-API-Key.
+	Autenticar *application.AutenticarConsumidor
+	// Registrar atiende POST /v1/api-keys. Si es nil, la ruta no se registra.
+	Registrar *application.RegistrarConsumidor
 	// VerificarSalud devuelve error si una dependencia imprescindible no responde.
 	VerificarSalud func(context.Context) error
 	// TimeoutDependencias limita cuánto espera cada solicitud a la base (ADR-010).
 	// Si es cero se usa TimeoutPorDefecto.
 	TimeoutDependencias time.Duration
+	// HabilitarErrorPrueba registra GET /error solo en entornos que lo habilitan explícitamente.
+	HabilitarErrorPrueba bool
 }
 
 // TimeoutPorDefecto es el tiempo máximo que una solicitud espera a MySQL antes
@@ -39,12 +43,27 @@ func NuevoRouter(d Dependencias) *gin.Engine {
 		d.TimeoutDependencias = TimeoutPorDefecto
 	}
 	r := gin.New()
-	r.Use(gin.Recovery(), observabilidad.MiddlewareGin(d.Log))
+	r.Use(gin.Recovery(), observabilidad.MiddlewareMetricas(), observabilidad.MiddlewareGin(d.Log))
 
+	r.GET("/metrics", gin.WrapH(observabilidad.HandlerMetricas()))
 	// Sin autenticación: lo usan Docker y el balanceador para saber si la instancia está viva.
 	r.GET("/health", salud(d.Log, d.VerificarSalud))
+	if d.HabilitarErrorPrueba {
+		r.GET("/error", func(c *gin.Context) {
+			ctx := c.Request.Context()
+			observabilidad.Logger(ctx, d.Log).ErrorContext(ctx, "error de prueba simulado")
+			problema(c, http.StatusInternalServerError, "error-simulado",
+				"Error de prueba", "Se generó un error de prueba para validar la observabilidad.")
+		})
+	}
 
-	v1 := r.Group("/v1", autenticar(d.APIKeys), limitarSolicitudes(SolicitudesPorMinuto))
+	// Sin API Key: es como se obtiene una. Se limita por IP para que no sirva
+	// para mandar correos en masa.
+	if d.Registrar != nil {
+		r.POST("/v1/api-keys", registrar(d))
+	}
+
+	v1 := r.Group("/v1", autenticar(d), limitarSolicitudes(SolicitudesPorMinuto))
 	v1.POST("/comprobantes", emitir(d))
 	v1.GET("/comprobantes/:comprobanteId", obtener(d))
 

@@ -4,6 +4,7 @@ package observabilidad
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 
@@ -15,6 +16,14 @@ import (
 func NuevoLogger(servicio string) *slog.Logger {
 	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
 	return slog.New(h).With("servicio", servicio)
+}
+
+// NuevoLoggerConMySQL escribe cada log en JSON por stdout y, de forma
+// asíncrona, intenta persistirlo en app_logs. La persistencia es best effort:
+// una falla de MySQL no afecta la operación del servicio.
+func NuevoLoggerConMySQL(servicio string, db *sql.DB) (*slog.Logger, func()) {
+	handler, cerrar := nuevoLoggerConMySQL(servicio, db, os.Stdout, os.Stderr)
+	return slog.New(handler), cerrar
 }
 
 // Logger devuelve el logger base con el id de correlación del contexto, si lo hay.

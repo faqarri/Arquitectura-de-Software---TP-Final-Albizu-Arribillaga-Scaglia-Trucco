@@ -278,3 +278,36 @@ func TestEmitirConRepositorioReal(t *testing.T) {
 		t.Errorf("otro cuerpo con la misma clave: error %v, se esperaba ErrConflictoIdempotencia", err)
 	}
 }
+
+func TestConsumidoresYClaves(t *testing.T) {
+	requiereMySQL(t)
+	ctx := context.Background()
+	grupo := "grupo-" + uuid.NewString()[:8]
+
+	if _, err := repo.EmailDelGrupo(ctx, grupo); !errors.Is(err, ports.ErrNoEncontrado) {
+		t.Fatalf("grupo inexistente: %v; se esperaba ErrNoEncontrado", err)
+	}
+	if err := repo.AgregarClave(ctx, grupo, "contacto@grupo.example", "hash-1-"+grupo); err != nil {
+		t.Fatal(err)
+	}
+	// Mismo email (sin distinguir mayúsculas): otra clave para el mismo grupo.
+	if err := repo.AgregarClave(ctx, grupo, "Contacto@Grupo.example", "hash-2-"+grupo); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AgregarClave(ctx, grupo, "otro@example.com", "hash-3-"+grupo); !errors.Is(err, ports.ErrGrupoRegistrado) {
+		t.Fatalf("otro email: %v; se esperaba ErrGrupoRegistrado", err)
+	}
+
+	email, err := repo.EmailDelGrupo(ctx, grupo)
+	if err != nil || email != "contacto@grupo.example" {
+		t.Fatalf("EmailDelGrupo = %q, %v", email, err)
+	}
+	for _, hash := range []string{"hash-1-" + grupo, "hash-2-" + grupo} {
+		if g, err := repo.GrupoPorClave(ctx, hash); err != nil || g != grupo {
+			t.Errorf("GrupoPorClave(%s) = %q, %v", hash, g, err)
+		}
+	}
+	if _, err := repo.GrupoPorClave(ctx, "hash-3-"+grupo); !errors.Is(err, ports.ErrNoEncontrado) {
+		t.Errorf("la clave rechazada no debía guardarse: %v", err)
+	}
+}

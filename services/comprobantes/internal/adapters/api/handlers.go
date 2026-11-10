@@ -35,12 +35,18 @@ const (
 const claveConsumidor = "consumidor"
 
 // autenticar identifica al grupo consumidor por su X-API-Key.
-func autenticar(apiKeys map[string]string) gin.HandlerFunc {
+func autenticar(d Dependencias) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		grupo, ok := apiKeys[c.GetHeader(headerAPIKey)]
-		if !ok {
+		ctx, cancelar := context.WithTimeout(c.Request.Context(), d.TimeoutDependencias)
+		defer cancelar()
+		grupo, err := d.Autenticar.Ejecutar(ctx, c.GetHeader(headerAPIKey))
+		switch {
+		case errors.Is(err, application.ErrClaveInvalida):
 			problema(c, http.StatusUnauthorized, "no-autenticado", "No autenticado",
-				"Falta el header X-API-Key o la clave no es válida.")
+				"Falta el header X-API-Key o la clave no es válida. Para obtener una: POST /v1/api-keys.")
+			return
+		case err != nil:
+			noDisponible(c, d, err)
 			return
 		}
 		c.Set(claveConsumidor, grupo)

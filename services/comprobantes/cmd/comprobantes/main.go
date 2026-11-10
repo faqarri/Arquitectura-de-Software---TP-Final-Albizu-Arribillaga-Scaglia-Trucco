@@ -62,6 +62,9 @@ func ejecutar(log *slog.Logger) error {
 	}
 	defer sqlDB.Close()
 
+	log, cerrarLogs := observabilidad.NuevoLoggerConMySQL(nombreServicio, sqlDB)
+	defer cerrarLogs()
+
 	// Adaptadores de salida.
 	repo := mysql.NuevoRepositorio(db)
 	generador := pdf.NuevoGenerador()
@@ -71,16 +74,24 @@ func ejecutar(log *slog.Logger) error {
 	emitir := application.NuevoEmitirComprobante(repo)
 	obtener := application.NuevoObtenerComprobante(repo)
 	enviar := application.NuevoEnviarComprobante(repo, generador, mailer)
+	// Los grupos con clave fija no se pueden registrar: compartirían sus comprobantes.
+	reservados := make([]string, 0, len(cfg.apiKeys))
+	for _, grupo := range cfg.apiKeys {
+		reservados = append(reservados, grupo)
+	}
+	registrar := application.NuevoRegistrarConsumidor(repo, mailer, reservados)
 
 	// Adaptadores de entrada.
 	servidor := &http.Server{
 		Addr: ":" + cfg.puertoHTTP,
 		Handler: api.NuevoRouter(api.Dependencias{
-			Log:            log,
-			Emitir:         emitir,
-			Obtener:        obtener,
-			APIKeys:        cfg.apiKeys,
-			VerificarSalud: sqlDB.PingContext,
+			Log:                  log,
+			Emitir:               emitir,
+			Obtener:              obtener,
+			Autenticar:           application.NuevoAutenticarConsumidor(repo, cfg.apiKeys),
+			Registrar:            registrar,
+			VerificarSalud:       sqlDB.PingContext,
+			HabilitarErrorPrueba: cfg.habilitarErrorPrueba,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
