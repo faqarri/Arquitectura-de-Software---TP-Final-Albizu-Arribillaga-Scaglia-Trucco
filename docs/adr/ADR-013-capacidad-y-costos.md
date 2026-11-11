@@ -8,7 +8,7 @@
 
 El enunciado pide pruebas de carga con resultados documentados y analizados, el principal límite identificado, una alternativa de escalado y una estimación de costos.
 
-Estado al 2026-10-23: el único servicio con código es **Comprobantes** (API, repositorio MySQL con outbox y worker de envíos). El **escenario A se ejecutó** y sus resultados están en [Resultados](#resultados). Catálogo y Reservas todavía no existen, así que el escenario B sigue siendo un plan. Los números de las secciones de objetivos, hipótesis y costos son objetivos o estimaciones; los de Resultados son mediciones.
+*(Contexto de la primera versión; el escenario B se ejecutó el 2026-11-10, ver [Resultados del escenario B](#resultados-del-escenario-b).)* Estado al 2026-10-23: el único servicio con código es **Comprobantes** (API, repositorio MySQL con outbox y worker de envíos). El **escenario A se ejecutó** y sus resultados están en [Resultados](#resultados). Catálogo y Reservas todavía no existen, así que el escenario B sigue siendo un plan. Los números de las secciones de objetivos, hipótesis y costos son objetivos o estimaciones; los de Resultados son mediciones.
 
 ## Decisión
 
@@ -73,7 +73,7 @@ export default function () {
 | Correos por segundo enviados | Métricas del worker y Mailpit |
 | CPU y memoria de cada contenedor | `docker stats` o cAdvisor |
 
-**Objetivos (no medidos):** con 20 solicitudes por segundo, p95 ≤ 300 ms, p99 < 500 ms (el objetivo de servicio de [ADR-011](ADR-011-observabilidad.md)) y menos de 0,1 % de errores; el 95 % de los correos llega a `ENVIADO` en 60 s o menos (también de ADR-011), sin acumulación sostenida en la cola.
+**Objetivos** (contrastados con la medición del 2026-11-10 en [Resultados del escenario B](#resultados-del-escenario-b)): con 20 solicitudes por segundo, p95 ≤ 300 ms, p99 < 500 ms (el objetivo de servicio de [ADR-011](ADR-011-observabilidad.md)) y menos de 0,1 % de errores; el 95 % de los correos llega a `ENVIADO` en 60 s o menos (también de ADR-011), sin acumulación sostenida en la cola.
 
 ### Escenario B: flujo de compra
 

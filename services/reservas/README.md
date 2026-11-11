@@ -96,7 +96,7 @@ Compartido en `pkg/`: `mensajeria` (reconexión, outbox, reintentos con DLQ) y `
 |---|---|---|
 | `DB_PASSWORD` | — (obligatoria) | `RESERVAS_DB_PASSWORD` del `.env` |
 | `RABBITMQ_URL` | — (obligatoria) | |
-| `CATALOGO_URL` | `http://catalogo:8080` (en compose: `catalogo-mock`) | API interna de Catálogo |
+| `CATALOGO_URL` | `http://catalogo:8080` (en compose, el alias de red de `catalogo-1` y `catalogo-2`; `http://catalogo-mock:4010` para probar sin Catálogo) | API interna de Catálogo |
 | `ESTUDIARIO_URL` | `http://estudiario-mock:4010` | URL de Estudiario en la nube (en el `.env`); sin ella, su mock |
 | `ESTUDIARIO_API_KEY` | vacía (en compose: una clave para el mock) | La entrega el Grupo 2 por privado. Va en `.env` |
 | `RECUPERACION_COMPRAS_INTERVALO` · `GUIAS_ENVIO_INTERVALO` · `GUIAS_MODERACION_INTERVALO` | `10s` · `30s` · `5m` | Procesos periódicos |
@@ -111,7 +111,7 @@ go test -short ./...                     # desde services/reservas: unitarios, A
 go test ./...                            # + integración contra MySQL y RabbitMQ reales (testcontainers, necesita Docker)
 ```
 
-Mientras Catálogo no esté en el compose, Reservas usa `catalogo-mock` (Prism con el contrato interno, que responde siempre los ejemplos) y `estudiario-mock` (el contrato del proveedor). Para probar sin gateway, mandá los headers a mano:
+En el compose, Reservas usa el Catálogo real (`catalogo-1` y `catalogo-2`) y, para las guías, Estudiario real si `ESTUDIARIO_URL` y `ESTUDIARIO_API_KEY` están en el `.env` (si no, `estudiario-mock`). Para probar Reservas aislado se puede apuntar a `catalogo-mock` (Prism con el contrato interno, que responde siempre los ejemplos) con `CATALOGO_URL=http://catalogo-mock:4010`. Para probar sin gateway, mandá los headers a mano:
 
 ```bash
 curl -X POST localhost:8082/api/carrito/items -H "X-Usuario-Id: u1" -H "X-Usuario-Email: ana@example.com" \

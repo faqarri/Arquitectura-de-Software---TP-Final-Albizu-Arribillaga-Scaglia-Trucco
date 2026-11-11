@@ -23,10 +23,10 @@ Los servicios tienen problemas muy distintos ([ADR-014](ADR-014-cupos-en-catalog
 | **Comprobantes** | **Hexagonal** (puertos y adaptadores) | Dos adaptadores de entrada (HTTP y consumidor RabbitMQ) usan el mismo caso de uso `EmitirComprobante`, que es exactamente el escenario del patrón. Los adaptadores de salida (MySQL, SMTP, PDF) se reemplazan por dobles en los tests unitarios, y el SMTP real o Mailpit se cambian por configuración. |
 | **Reservas** | **Hexagonal** | El dominio (estados de compra y de ítem, transiciones válidas) se prueba sin infraestructura. El puerto `RetencionesCatalogo` permite probar timeouts, reintentos y la recuperación de compras `PENDIENTE` con un doble que falla a pedido. |
 | **Catálogo** | **En capas** (handlers → services → repository) | Las reglas críticas viven en transacciones SQL. Esconder el repositorio detrás de un puerto genérico taparía justamente lo que hay que mostrar y revisar (bloqueos y su orden). Las capas son más directas y alcanzan para separar HTTP, lógica y acceso a datos. |
-| **Usuarios** | **En capas** | ABM simple: un estilo más elaborado no aporta. |
+| **Usuarios** | **Hexagonal** (ver Revisiones) | Se planeó en capas por ser un ABM simple; se implementó con puertos y adaptadores, igual que Reservas, para reutilizar la estructura y probar los casos de uso sin base de datos. |
 | **Tiempo Real** | Componentes simples (`sse`, `hub`, `consumer`) | No tiene dominio ni persistencia; ningún patrón de capas o puertos agrega valor. |
 
-Los dos estilos que se presentan como requisito son **hexagonal** (Comprobantes y Reservas) y **en capas** (Catálogo y Usuarios).
+Los dos estilos que se presentan como requisito son **hexagonal** (Comprobantes, Reservas y Usuarios) y **en capas** (Catálogo).
 
 ### Reglas de dependencia
 
@@ -64,3 +64,9 @@ ports (interfaces)  ◄──  application (casos de uso)  ──►  domain (en
 - (+) Las reglas de dominio de los servicios hexagonales se prueban con tests unitarios rápidos, sin infraestructura.
 - (−) Los servicios hexagonales tienen más archivos e interfaces, y más código de armado en `main.go`.
 - (−) En Catálogo, la lógica crítica queda acoplada a MySQL. Se acepta porque es deliberada y se cubre con tests de integración contra MySQL real.
+
+## Revisiones
+
+| Fecha | Cambio | Motivo |
+|---|---|---|
+| 2026-11-11 | **Usuarios se implementó hexagonal**, no en capas: `internal/domain`, `internal/ports`, `internal/application` y `internal/adapters` (`api`, `mysql`), la misma estructura que Reservas. El estilo en capas queda representado por **Catálogo**, el servicio donde más se justifica (la lógica crítica vive en transacciones SQL a la vista). Los dos estilos que pide el enunciado se siguen cumpliendo, y la regla de dependencias de cada uno se verifica con un test automático (`arquitectura_test.go` en Reservas y en Catálogo). | Al implementar, se reutilizó la estructura de Reservas para probar los casos de uso de registro y login sin base de datos. Se actualiza el ADR para que describa el código real. |

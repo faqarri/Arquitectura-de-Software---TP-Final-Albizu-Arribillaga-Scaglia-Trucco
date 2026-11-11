@@ -1,6 +1,6 @@
 # Servicio Usuarios
 
-Implementa el registro, el inicio de sesión y la emisión de JWT para los roles `cliente` y `admin`. Usa arquitectura en capas; sus datos viven en el esquema MySQL `usuarios`.
+Implementa el registro, el inicio de sesión y la emisión de JWT para los roles `cliente` y `admin`. Usa arquitectura hexagonal (dominio, puertos, casos de uso y adaptadores HTTP y MySQL, [ADR-002](../../docs/adr/ADR-002-arquitectura-interna.md)); sus datos viven en el esquema MySQL `usuarios`.
 
 ## Rutas
 

@@ -9,6 +9,7 @@ Análisis de fallas del sistema, provocadas o no, en formato sin culpables: qué
 | 3 | 2026-10-23 | Caída del servidor de correo | Ensayo controlado | Documentado en [ADR-010](adr/ADR-010-resiliencia.md#revisiones) | Cerrado |
 | 4 | 2026-11-10 | [Caída de una instancia de Catálogo](#4-caída-de-una-instancia-de-catálogo) | Ensayo controlado | 3 de 224 lecturas con `502` durante ~17 s; corregido (0 en la repetición) | Cerrado |
 | 5 | 2026-11-10 | [Caída del proveedor (Estudiario)](#5-caída-del-proveedor-estudiario) | Ensayo controlado | Guías sin servicio ~1 min; compartir una guía devolvía `502` aunque se guardaba; corregido | Cerrado |
+| 6 | 2026-11-09 | [Caída de Redis (caché de Catálogo)](#6-caída-de-redis-caché-de-catálogo) | Ensayo controlado | Ninguna solicitud falló; tres lecturas tardaron ~100 ms | Cerrado |
 
 ---
 
@@ -196,3 +197,44 @@ flowchart LR
 | Acotar el envío inmediato de una guía por debajo del timeout del gateway | Hecho |
 | Registrar el comportamiento ante la caída en [ADR-009](adr/ADR-009-consumo-del-proveedor.md#revisiones) | Hecho |
 | Las primeras consultas de guías tardan 6,5 s hasta que se abre el circuito. El frontend las carga aparte ("Buscando guías…"), así que no bloquea el detalle; si molesta, bajar a 1 reintento la lectura de guías | Aceptado |
+
+---
+
+## 6. Caída de Redis (caché de Catálogo)
+
+**Resumen.** Ensayo controlado: se detuvo Redis con el sistema funcionando, para verificar que la caché es opcional ([ADR-007](adr/ADR-007-cache.md)): Catálogo debe seguir respondiendo desde MongoDB, dejar de consultar Redis después de varios errores y volver a usarlo solo cuando Redis vuelve.
+
+**Impacto.**
+- Ninguna solicitud falló: las 7 lecturas del detalle hechas con Redis caído respondieron `200`, desde MongoDB.
+- Las tres primeras tardaron unos 100 ms (esperaban el timeout de Redis); después del corte volvieron a tardar unos 5 ms.
+- `/health` siguió en `ok`: ninguna instancia salió del balanceo.
+- Durante la caída, toda la carga del detalle pasó a MongoDB.
+
+**Línea de tiempo** (2026-11-09):
+
+| Hora | Hecho |
+|---|---|
+| 20:20:43 | Redis sano: detalle `MISS` en 14 ms y después `HIT` en 4 ms |
+| 20:20:44 | `docker compose stop redis` |
+| 20:20:44 | Primeras lecturas: `200` desde MongoDB, unos 100 ms cada una; `cache_errores_total` sube a 5 |
+| 20:20:44 | Con 5 errores seguidos, Catálogo deja de consultar Redis por 30 s (`cache_circuito_abierto = 1`) y registra `WARN` "Redis falla seguido: se deja de usar la caché por un tiempo". Las lecturas siguientes tardan unos 5 ms |
+| 20:20:46 | `docker compose start redis` |
+| 20:21:18 | Termina la pausa: `MISS` en 6 ms y después `HIT` en 3 ms. La caché vuelve sola (`cache_circuito_abierto = 0`) |
+
+**Detección.** Paneles "Caché: errores de Redis y corte" y "Caché: tasa de aciertos del detalle" del tablero de Grafana, y el log `WARN` de Catálogo. El header `X-Cache: MISS` en todas las respuestas también lo muestra.
+
+**Causa.** Provocada (ensayo).
+
+**Qué funcionó.**
+- El timeout de 50 ms y el corte después de 5 errores: la caída de Redis sumó latencia solo a las primeras solicitudes de cada instancia.
+- `/health` no depende de Redis, así que el gateway no sacó instancias del balanceo por una falla de la caché.
+- La vuelta es automática: al terminar la pausa, Catálogo prueba Redis de nuevo.
+
+**Riesgo detectado.** Con mucho tráfico, cada instancia paga hasta 5 timeouts de 50 ms antes de cortar, y toda la carga del detalle pasa a MongoDB mientras Redis está caído. En la prueba de carga (incidente 1) se vio que MongoDB puede agotar su pool de conexiones en ese escenario.
+
+**Acciones.**
+
+| Acción | Estado |
+|---|---|
+| Documentar el ensayo ([docs/ensayos/2026-11-09-catalogo.md](ensayos/2026-11-09-catalogo.md)) | Hecho |
+| Bajar a 3 los errores para cortar, si en la jornada grupal el pico de latencia resulta molesto | No se hace por ahora: el efecto medido fue chico |

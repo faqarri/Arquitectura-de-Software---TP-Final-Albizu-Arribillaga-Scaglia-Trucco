@@ -16,7 +16,7 @@ Ya hay piezas decididas que este ADR ordena y completa: timeouts y reintentos id
 
 1. **Ninguna espera sin límite:** toda llamada de red tiene timeout.
 2. **Reintentar solo lo idempotente**, con backoff y jitter, y con un tope.
-3. **No insistir contra una dependencia caída:** circuit breaker en la llamada síncrona crítica (Reservas → Catálogo).
+3. **No insistir contra una dependencia caída:** circuit breaker en la llamada al proveedor externo (Estudiario) y corte simple de la caché (Redis). En la llamada Reservas → Catálogo, timeouts cortos con un tope de reintentos y la compra `PENDIENTE` con recuperación automática (el circuit breaker diseñado para esa llamada no se implementó; ver [Revisiones](#revisiones)).
 4. **Lo que no puede perderse se escribe primero en la base** (outbox) y se entrega después, con reintentos y DLQ.
 5. **Degradar por funcionalidad:** si cae una dependencia, solo deja de funcionar lo que la necesita.
 
@@ -34,7 +34,7 @@ Ya hay piezas decididas que este ADR ordena y completa: timeouts y reintentos id
 | | RabbitMQ | Nada falla para el usuario: los eventos se acumulan en el outbox (tabla MySQL o marca en el documento, ADR-006) y se publican al volver. Tiempo real e indexación se atrasan | — |
 | | Redis | Se lee MongoDB directamente; más latencia, sin errores ([ADR-007](ADR-007-cache.md)) | Timeout 50 ms; corte de 30 s tras 5 errores |
 | **Reservas** | MySQL | Carrito y compras responden `503`; `/health` falla | Timeout 2 s |
-| | Catálogo (API interna) | Retener: `503`, el ítem no se agrega. Liberar: el ítem se quita igual (la retención vence sola). Confirmar: la compra queda `PENDIENTE` (`202`) y la recuperación reintenta | Timeout 2 s, 2 reintentos; luego, igual que si fallara. El circuit breaker evita seguir cargándolo |
+| | Catálogo (API interna) | Retener: `503`, el ítem no se agrega. Liberar: el ítem se quita igual (la retención vence sola). Confirmar: la compra queda `PENDIENTE` (`202`) y la recuperación reintenta | Timeout 2 s, 2 reintentos (≈ 7 s en el peor caso); luego, igual que si fallara. Sin circuit breaker (ver [Revisiones](#revisiones)) |
 | | RabbitMQ | Las compras se confirman igual; `CompraConfirmada` espera en el outbox y el correo se atrasa. `RetencionVencida` no llega: el carrito usa `expiraEn` | — |
 | **Comprobantes** | MySQL | `POST` y `GET` responden `503`; el consumidor de `CompraConfirmada` no confirma el mensaje y lo reintenta | Timeout 2 s |
 | | RabbitMQ | La API sigue emitiendo: `EnvioSolicitado` espera en el outbox y el correo sale al volver. `CompraConfirmada` queda en la cola de Reservas | — |
@@ -47,14 +47,16 @@ Ya hay piezas decididas que este ADR ordena y completa: timeouts y reintentos id
 |---|---|---|
 | **Timeouts** | Toda llamada de red | Valores de la tabla anterior; ADR-005 para Reservas → Catálogo |
 | **Reintentos idempotentes** | Reservas → Catálogo; consumidores de RabbitMQ | ADR-005: 2 reintentos (200 ms, 400 ms, con jitter) en HTTP; 3 reintentos con espera creciente en colas |
-| **Circuit breaker** | Reservas → Catálogo | Ver abajo |
+| **Circuit breaker** | Catálogo y Reservas → Estudiario (`pkg/estudiario`); caché Redis de Catálogo | Estudiario: se abre con 5 fallas seguidas y queda abierto 30 s; el detalle responde las guías como no disponibles y no se espera al proveedor ([ADR-009](ADR-009-consumo-del-proveedor.md)). Redis: 5 errores seguidos y 30 s sin consultarlo ([ADR-007](ADR-007-cache.md)). Reservas → Catálogo **no** tiene: ver la sección siguiente |
 | **Outbox** | Reservas, Catálogo, Comprobantes | Ningún evento se pierde si el broker o el servicio caen después del commit |
 | **DLQ** | Todas las colas salvo las de Tiempo Real | Los mensajes que agotan los reintentos se guardan para análisis y reprocesamiento |
 | **Health checks** | `GET /health` en cada servicio, sin autenticación | Verifica las dependencias imprescindibles del servicio (su base de datos); **no** incluye las opcionales (Redis, OpenSearch), para que una falla parcial no saque la instancia del balanceo. Lo usan Docker y el gateway (D12) |
 | **Límite de solicitudes** | Gateway; API pública de Comprobantes (60 por minuto por API Key) | Un consumidor que se excede no degrada al resto |
 | **Degradación controlada** | Ver la tabla de dependencias | Caché opcional, búsqueda separada del flujo de compra, compra `PENDIENTE`, tiempo real de mejor esfuerzo |
 
-### Circuit breaker Reservas → Catálogo
+### Circuit breaker Reservas → Catálogo (diseñado, no implementado)
+
+> **No se implementó** (revisión del 2026-11-11). Se conserva el diseño original como registro. En el código, la llamada Reservas → Catálogo se protege con el timeout de 2 s por intento, 2 reintentos con backoff y la compra `PENDIENTE` con recuperación automática. La métrica `circuit_breaker_estado` no existe.
 
 | Parámetro | Valor inicial |
 |---|---|
@@ -74,7 +76,7 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 **Escenario:**
 
 1. Con todo funcionando, se detiene Mailpit: `docker compose stop mailpit`.
-2. Se emiten comprobantes por la API (`POST /v1/comprobantes`) y, cuando exista el flujo completo, con una compra.
+2. Se emiten comprobantes por la API (`POST /v1/comprobantes`) y con una compra.
 3. Se observan los logs, las métricas, el estado de los comprobantes (`GET /v1/comprobantes/{id}`) y las colas en la consola de RabbitMQ.
 4. A los 3 minutos se vuelve a levantar Mailpit (`docker compose start mailpit`) y se emite un comprobante nuevo.
 
@@ -92,7 +94,7 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 
 **Requisitos para poder demostrarlo:** ya están implementados en Comprobantes la API, el repositorio MySQL con outbox, el publicador de outbox y el worker de envíos con colas de reintento y DLQ (Entrega 2). En el ensayo del 2026-10-23, un comprobante llegó a `FALLIDO` unos 70 s después de emitirse: las esperas (5 + 15 + 30 s) más el tiempo de cada intento fallido (ver [Revisiones](#revisiones)).
 
-**Caída secundaria (si llega el tiempo):** Catálogo caído durante una compra. Se espera ver el circuit breaker abriéndose, la compra en `PENDIENTE` y su resolución automática cuando Catálogo vuelve. Requiere Reservas y Catálogo implementados.
+**Caída secundaria (si llega el tiempo):** Catálogo caído durante una compra. Se espera ver, tras los timeouts y reintentos, la compra en `PENDIENTE` y su resolución automática cuando Catálogo vuelve. Requiere Reservas y Catálogo implementados.
 
 ### Qué se registra en `docs/POSTMORTEM.md`
 
@@ -110,7 +112,7 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 
 ## Alternativas consideradas
 
-- **Solo timeouts y reintentos, sin circuit breaker.** Ante una caída de Catálogo, cada solicitud de Reservas esperaría hasta 3 timeouts (≈ 7 s) antes de fallar, ocupando conexiones y cargando a Catálogo justo cuando intenta recuperarse. Descartada.
+- **Solo timeouts y reintentos, sin circuit breaker.** Ante una caída de Catálogo, cada solicitud de Reservas esperaría hasta 3 timeouts (≈ 7 s) antes de fallar, ocupando conexiones y cargando a Catálogo justo cuando intenta recuperarse. Descartada en el diseño; es lo que finalmente quedó para Reservas → Catálogo (ver [Revisiones](#revisiones)).
 - **Circuit breaker en todas las dependencias.** Para las colas y la caché no aporta: el outbox y la DLQ ya resuelven la falla de forma asíncrona, y la caché tiene su propio corte simple. Se reserva para llamadas síncronas a servicios (Reservas → Catálogo y el proveedor externo, [ADR-009](ADR-009-consumo-del-proveedor.md)). Descartada como regla general.
 - **Service mesh (por ejemplo, Istio) para timeouts, reintentos y circuit breaking.** Resuelve esto sin código, pero agrega una infraestructura que no se justifica para el tamaño del sistema ni para Docker Compose. Descartada.
 - **Provocar la caída de MySQL como demostración principal.** Es más drástico, pero solo muestra `503` y health checks fallando; la caída del correo muestra varios mecanismos a la vez (separación entre emisión y envío, outbox, reintentos, DLQ, estado final). Descartada como principal.
@@ -119,11 +121,12 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 
 - (+) Cada dependencia tiene un comportamiento definido ante falla y ante lentitud.
 - (+) El flujo de compra no depende del correo, de la búsqueda, de la caché ni del tiempo real.
-- (+) El circuit breaker protege a Catálogo y da respuestas rápidas al usuario durante una caída.
+- (+) El circuit breaker de Estudiario y el corte de Redis evitan que una dependencia caída sume esperas a cada solicitud.
+- (−) Si Catálogo cae entero, cada solicitud de Reservas espera hasta ≈ 7 s (3 intentos de 2 s) antes de fallar o de dejar la compra `PENDIENTE`. Una sola instancia caída no produce esta espera: Reservas llega a Catálogo por el alias de red, que solo resuelve a las instancias activas (verificado el 2026-11-11 con `catalogo-2` detenida).
 - (−) Más estados que explicar al usuario (`PENDIENTE` en compras y en envíos).
 - (−) Los valores (timeouts, umbrales, esperas) son iniciales; se ajustan con las pruebas de carga ([ADR-013](ADR-013-capacidad-y-costos.md)).
 - (−) Un envío `FALLIDO` no tiene, por ahora, forma de reintentarse.
-- (−) La demostración depende de que se completen las partes pendientes de Comprobantes.
+- (−) La demostración dependía de completar Comprobantes; se ensayó el 2026-10-23 (ver [Revisiones](#revisiones)) y las demás caídas están en el [POSTMORTEM](../POSTMORTEM.md).
 
 ## Revisiones
 
@@ -131,3 +134,4 @@ Métrica `circuit_breaker_estado{destino="catalogo"}` (0 cerrado, 1 semiabierto,
 |---|---|---|
 | 2026-10-23 | **Ensayo de la caída del correo** (`docker compose stop mailpit`), con resultado igual al esperado: 3 `POST` respondieron `201 PENDIENTE` en 17 a 25 ms; cada envío falló en el intento 1 y en los reintentos de 5, 15 y 30 s (log `WARN` por intento, con `trace_id` y `correlacion_id`); a los ~70 s de la emisión los tres quedaron `FALLIDO` y `comprobantes.envios.dlq` pasó de 0 a 3 mensajes. Al levantar Mailpit, un comprobante nuevo llegó a `ENVIADO` en menos de 3 s y los tres de la caída siguieron `FALLIDO`. Se corrige el tiempo esperado hasta `FALLIDO` (de "unos 50 s" a "unos 70 s"). **Hallazgo:** con el volumen de MySQL vacío, el primer `docker compose up` dejó a Comprobantes detenido (`connection refused`). El healthcheck de MySQL da por sano al servidor temporal de inicialización, que todavía no acepta conexiones TCP, y Comprobantes no reintenta la conexión al iniciar ni tiene `restart`. Se agrega como acción: healthcheck por TCP, `restart: on-failure` y reintentos de conexión al arrancar. | Ensayo previo a la jornada de fallas controladas. Sirve de base para `docs/POSTMORTEM.md`. El hallazgo afecta el requisito de puesta en marcha con un procedimiento único. |
 | 2026-11-07 | **Acción del ensayo resuelta (arranque en frío):** el healthcheck de MySQL pasa a ser por TCP (`mysqladmin ping -h 127.0.0.1`, con `start_period`), que falla mientras corre el servidor temporal de inicialización; Comprobantes y Reservas tienen `restart: on-failure`; Reservas además reintenta la conexión a MySQL al arrancar (backoff de hasta 2 minutos). Reservas suma protecciones: timeout de 2 s y 2 reintentos con backoff hacia Catálogo, compra `PENDIENTE` con proceso de recuperación, y circuit breaker hacia Estudiario (ADR-009). | El primer `docker compose up` con el volumen vacío dejaba a Comprobantes detenido, lo que rompía el requisito de puesta en marcha con un procedimiento único. |
+| 2026-11-11 | **El circuit breaker Reservas → Catálogo no se implementó.** La llamada se protege con el timeout de 2 s por intento, 2 reintentos con backoff y jitter, y la compra `PENDIENTE` con recuperación automática, que termina a lo sumo cuando vencen las retenciones (cubierto por los tests del cliente de Reservas y de la recuperación de compras pendientes). Los circuit breakers implementados son el de Estudiario (`pkg/estudiario`: 5 fallas seguidas, 30 s abierto, ensayado en el [POSTMORTEM #5](../POSTMORTEM.md#5-caída-del-proveedor-estudiario)) y el corte de la caché Redis en Catálogo ([POSTMORTEM #6](../POSTMORTEM.md#6-caída-de-redis-caché-de-catálogo)). Se corrigen el principio 3, las tablas de dependencias y de mecanismos, y las consecuencias; el diseño original queda marcado como no implementado. | La documentación prometía un mecanismo que no está en el código. Con el tiempo de la entrega se priorizó lo demás: el costo aceptado es una espera de hasta ≈ 7 s por solicitud si Catálogo cae entero, sin riesgo para la consistencia, porque los reintentos son idempotentes ([ADR-004](ADR-004-consistencia-y-concurrencia.md)). |

@@ -114,7 +114,7 @@ Para cambios de mapping, corrupción del índice o mensajes perdidos (operación
 
 ### Retraso máximo tolerable
 
-**Objetivo:** el 95 % de los cambios aparece en la búsqueda en **5 segundos o menos** (p95 ≤ 5 s), y ninguno tarda más de 30 s mientras todos los componentes funcionan. Es un **objetivo, todavía no medido**.
+**Objetivo:** el 95 % de los cambios aparece en la búsqueda en **5 segundos o menos** (p95 ≤ 5 s), y ninguno tarda más de 30 s mientras todos los componentes funcionan. **Medido el 2026-11-10:** p50 1,00 s, p95 1,11 s, máximo 1,17 s sobre 100 cambios, ninguno sin aparecer; cumple el objetivo (detalle en [Revisiones](#revisiones) y en [ADR-013](ADR-013-capacidad-y-costos.md)).
 
 Presupuesto estimado: publicador hasta 1 s + cola e indexación menos de 0,5 s + `refresh_interval` de OpenSearch 1 s ≈ 2,5 s, con margen para picos.
 

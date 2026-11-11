@@ -8,7 +8,7 @@ Registro y consulta de documentos PDF con moderación, que usamos para las **gu�
 | Guía del proveedor | [docs/contracts/README.md](https://github.com/MichiSil/ProyectoEstudiario/blob/main/docs/contracts/README.md) |
 | Contrato publicado | [documents-v1.yaml](https://github.com/MichiSil/ProyectoEstudiario/blob/main/docs/contracts/documents-v1.yaml) |
 | **Versión fijada** | **1.0.0**, en [1.0.0/documents-v1.yaml](1.0.0/documents-v1.yaml), copiada el 2026-11-07 junto con su PDF de ejemplo |
-| URL pública | Pendiente de que la publique el proveedor. Va en `ESTUDIARIO_URL` del `.env` |
+| URL pública | `https://estudiario-ucc.chilecentral.cloudapp.azure.com` (publicada el 2026-11-10; capacidad en `/v1`, estado en `/health`, PDF público en `/v1/public/documents/{id}/file`). Va en `ESTUDIARIO_URL` del `.env` |
 | API Key | La entrega el proveedor por privado. Va en `ESTUDIARIO_API_KEY` del `.env`, **nunca** en el repositorio |
 | Mock local | `estudiario-mock` en el docker-compose (`http://localhost:4030`), con la versión fijada |
 | Adaptador | [`pkg/estudiario`](../../../../pkg/estudiario) |

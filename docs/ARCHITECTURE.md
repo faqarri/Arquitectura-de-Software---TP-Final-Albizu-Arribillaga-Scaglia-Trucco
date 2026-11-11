@@ -18,7 +18,7 @@ Cada servicio accede solo a su propia base. Ningún servicio lee la base de otro
 
 Decisiones principales: límites de servicios en [ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md) (reemplaza a ADR-001), arquitectura interna en [ADR-002](adr/ADR-002-arquitectura-interna.md) y tiempo real en [ADR-015](adr/ADR-015-disponibilidad-en-tiempo-real.md).
 
-**Arquitectura interna ([ADR-002](adr/ADR-002-arquitectura-interna.md)):** Comprobantes y Reservas son **hexagonales** (puertos y adaptadores); Catálogo y Usuarios están organizados **en capas**; Tiempo Real es un conjunto de componentes simples.
+**Arquitectura interna ([ADR-002](adr/ADR-002-arquitectura-interna.md)):** Comprobantes, Reservas y Usuarios son **hexagonales** (puertos y adaptadores); Catálogo está organizado **en capas**; Tiempo Real es un conjunto de componentes simples.
 
 **Identidad:** el gateway valida el JWT y propaga a los servicios `X-Usuario-Id`, `X-Usuario-Email` y `X-Usuario-Rol`, después de descartar esos headers si vinieron del cliente.
 
@@ -263,20 +263,18 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 
 ## 8. Pendientes de diseño
 
-- D4 Consistencia y concurrencia: formalizar lo descrito en ADR-014 (regla de bloqueo, idempotencia, recuperación), en Comprobantes (idempotencia por consumidor, outbox del envío) y en ADR-006 (outbox dentro del documento de la oferta).
-- D9 Consumo del proveedor: la estrategia está en [ADR-009](adr/ADR-009-consumo-del-proveedor.md); falta completar flujo, servicio consumidor y experiencia ante fallas cuando la cátedra asigne el proveedor.
-- D11 Observabilidad y D12 Balanceo de carga: implementación local en [ADR-011](adr/ADR-011-observabilidad.md) y [ADR-012](adr/ADR-012-balanceo-de-carga.md). Comprobantes, Reservas y Catálogo persisten logs en MySQL; Prometheus y Grafana muestran métricas, logs, salud, caché y alertas. El ensayo local de balanceo está documentado. Falta validar en vivo la alerta global de 5xx y ampliar las métricas de negocio.
-- D13 Capacidad: escenarios A y B medidos en [ADR-013](adr/ADR-013-capacidad-y-costos.md), con la caché (ADR-007) y la búsqueda (ADR-006). Falta B3 (vencimiento masivo) y medir con el gateway delante.
-- Validación de D1, D3 y D5: hecha el 2026-10-23 sobre Comprobantes (ver Revisiones de ADR-014, ADR-003 y ADR-005). Falta revalidar cuando existan Catálogo y Reservas: patrón de retención, regla de bloqueo, API interna con circuit breaker y eventos de Catálogo.
-- Tecnología del API Gateway (debe soportar SSE: sin buffering y con timeouts largos por ruta).
-- Operación administrativa para reintentar el envío de un comprobante `FALLIDO` (acción de mejora de [ADR-010](adr/ADR-010-resiliencia.md)).
+Las trece decisiones obligatorias (D1 a D13) están tomadas, implementadas y validadas con evidencia sobre el sistema (ver el [índice de ADR](adr/README.md)). Quedan como mejoras, fuera del alcance de la entrega:
+
+- **D13 Capacidad:** el escenario B3 (vencimiento masivo de retenciones) no se midió, y las pruebas de carga se hicieron sin el gateway delante, así que su costo no está medido ([ADR-013](adr/ADR-013-capacidad-y-costos.md)).
+- **D11 Observabilidad:** métricas de negocio, de colas y del outbox, y un span propio del publicador de outbox ([ADR-011](adr/ADR-011-observabilidad.md)).
+- **Comprobantes:** operación administrativa para reintentar el envío de un comprobante `FALLIDO` (acción de mejora de [ADR-010](adr/ADR-010-resiliencia.md)).
 
 ## 9. Limitaciones conocidas y deuda técnica
 
 - **Agregar al carrito depende de Catálogo.** Si Catálogo no responde, no se puede agregar (`503`). Es el costo de retener cupo en el momento.
 - **Bloqueo de cupo sin compra.** Un usuario puede retener cupo hasta 15 minutos sin comprar. Se acota con un máximo de 6 cupos por oferta y por carrito (supuesto).
 - **Compras en `PENDIENTE`.** Si Catálogo no responde al confirmar, la compra queda pendiente hasta que el proceso de recuperación obtenga una respuesta (como máximo, el tiempo de retención).
-- **Dos almacenes en Catálogo sin transacción común.** Una oferta puede quedar en MongoDB sin su fila de inventario si falla la segunda escritura; queda visible pero no retenible hasta que una reconciliación la corrija.
+- **Dos almacenes en Catálogo sin transacción común.** El alta de una oferta escribe primero el inventario en MySQL y después la descripción en MongoDB. Si falla la segunda escritura, queda un inventario sin oferta: no se ve ni se puede retener, porque retener lee la oferta de MongoDB ([ADR-004](adr/ADR-004-consistencia-y-concurrencia.md)).
 - **Tiempo real de mejor esfuerzo.** Los avisos pueden perderse o llegar tarde (hasta el intervalo del proceso de vencimiento, 15 s por defecto, más la latencia del outbox). La fuente de verdad es `GET /api/ofertas/{id}/disponibilidad`.
 - **Conexiones largas en el gateway.** Cada navegador con la app abierta mantiene hasta dos conexiones SSE. Con HTTP/1.1, varias pestañas pueden alcanzar el límite de conexiones por dominio.
 - **Reloj del navegador.** La cuenta regresiva usa `expiraEn` y el reloj local; si el reloj del cliente está desfasado, puede mostrar un tiempo distinto. La validez real la decide siempre la base de Catálogo.
@@ -310,3 +308,4 @@ Cada servicio documenta su estructura interna y dependencias en su propio `READM
 | 2026-10-23 | Validación de D1, D3 y D5 sobre Comprobantes y resultados de la prueba de carga del escenario A. Pendientes y limitaciones actualizados: arranque en frío, capacidad medida solo en Comprobantes y límite del publicador del outbox. | Entrega 2: evidencia en ejecución (revisiones de [ADR-003](adr/ADR-003-persistencia.md#revisiones), [ADR-005](adr/ADR-005-comunicacion-entre-servicios.md#revisiones), [ADR-014](adr/ADR-014-cupos-en-catalogo-con-retencion.md#revisiones), [ADR-010](adr/ADR-010-resiliencia.md#revisiones) y [ADR-013](adr/ADR-013-capacidad-y-costos.md#revisiones)). |
 | 2026-11-10 | Limitaciones con los valores medidos (búsqueda, caché, oferta caliente, MySQL compartido, publicador del outbox), OpenSearch en un nodo, trazas en memoria y recortes de alcance. Se marca resuelto el arranque en frío. El despliegue en la nube apunta a [DESPLIEGUE.md](DESPLIEGUE.md). D13 actualizado. | Presentación grupal: búsqueda implementada, escenario B medido y despliegue preparado ([ADR-006](adr/ADR-006-busqueda.md#revisiones), [ADR-007](adr/ADR-007-cache.md), [ADR-013](adr/ADR-013-capacidad-y-costos.md#resultados-del-escenario-b)). |
 | 2026-11-10 | Se actualiza el estado de D11/D12: dashboard y alertas aprovisionados; Gateway integrado con las dos instancias de Catálogo y ensayo de caída, alerta y recuperación documentado. Quedan como pendientes la alerta global de 5xx bajo carga y métricas adicionales de negocio. | Integración del Gateway/observabilidad con Catálogo; evidencia en [ensayo](ensayos/2026-11-10-balanceo-gateway.md) y [ADR-012](adr/ADR-012-balanceo-de-carga.md). |
+| 2026-11-11 | Pendientes de diseño: D4 (ADR-004), D9 y la validación de D1, D3 y D5 ya están resueltas; quedan B3, la medición con el gateway delante, métricas de negocio y el reintento de envíos `FALLIDO`. Usuarios figura como hexagonal (ADR-002). Se corrige la limitación de los dos almacenes de Catálogo: el inventario se escribe primero. | Coherencia con el código y con los ADR al cierre. |

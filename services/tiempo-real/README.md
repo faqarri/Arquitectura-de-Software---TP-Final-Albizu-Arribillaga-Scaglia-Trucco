@@ -43,6 +43,6 @@ curl -N "http://localhost:8080/api/tiempo-real/ofertas?ids=<id de una oferta>"
 # en otra terminal, agregar esa oferta al carrito: llega "event: disponibilidad"
 ```
 
-**Tests:** `go test ./...` (hub, traducción de eventos y streams SSE con `httptest`).
+**Tests:** `go test -short ./...` corre los unitarios (hub, traducción de eventos y streams SSE con `httptest`). `go test ./...` agrega el de integración contra **RabbitMQ real** (testcontainers): dos instancias consumen el fanout `catalogo.disponibilidad` y las dos reciben cada evento tal como lo publica Catálogo, y un mensaje mal formado no detiene el consumidor. Necesita Docker.
 
 **Historial:** 2026-10-22: servicio nuevo, incorporado en la devolución de la Entrega 1. 2026-11-10: implementación (ver Revisiones de [ADR-015](../../docs/adr/ADR-015-disponibilidad-en-tiempo-real.md)).

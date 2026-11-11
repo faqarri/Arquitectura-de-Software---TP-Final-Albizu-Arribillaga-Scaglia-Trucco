@@ -295,7 +295,7 @@ Arribillaga redacta `docs/POSTMORTEM.md`: impacto, línea de tiempo (con horas r
 | Enunciado | Dónde se ve | ✔ |
 |---|---|---|
 | 3+ microservicios y api gateway (§2.1) | Usuarios, Catálogo, Reservas, Comprobantes y Gateway en `docker-compose.yml` | ☒ |
-| Dos estilos de arquitectura (§2.1) | Hexagonal: Comprobantes y Reservas. En capas: Catálogo y Usuarios (ADR-002) | ☒ |
+| Dos estilos de arquitectura (§2.1) | Hexagonal: Comprobantes, Reservas y Usuarios. En capas: Catálogo (ADR-002) | ☒ |
 | Frontend completo (§2.2) | `frontend/`, del login hasta la compra y las guías | ☒ |
 | Balanceo con 2+ instancias, detección de caídas y evidencia (§2.3) | Gateway + `catalogo-1`/`catalogo-2` + panel por instancia; [ensayo integrado](./ensayos/2026-11-10-balanceo-gateway.md) | ☒ |
 | Comunicación síncrona con timeout, reintentos y respuestas tardías (§2.5) | Reservas → Catálogo (ADR-005), Catálogo/Reservas → Estudiario (ADR-009) | ☒ |
